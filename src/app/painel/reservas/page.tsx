@@ -1,0 +1,238 @@
+"use client";
+
+import { useState, useEffect } from "react";
+
+const STATUS_OPTIONS = [
+   { value: "ALL", label: "Todos", color: "bg-gray-700 text-gray-300" },
+   { value: "CONFIRMED_PREPAID", label: "Pago Online", color: "bg-green-500/20 text-green-400" },
+   { value: "PENDING_PIX", label: "PIX Pendente", color: "bg-yellow-500/20 text-yellow-400" },
+   { value: "CONFIRMED_NON_PREPAID", label: "Pagar no Balcão", color: "bg-blue-500/20 text-blue-400" },
+   { value: "CANCELLED", label: "Cancelada", color: "bg-red-500/20 text-red-400" },
+];
+
+const STATUS_COLORS: Record<string, string> = {
+   "CONFIRMED_PREPAID": "bg-green-500/20 text-green-400 border-green-600/30",
+   "PENDING_PIX": "bg-yellow-500/20 text-yellow-400 border-yellow-600/30",
+   "CONFIRMED_NON_PREPAID": "bg-blue-500/20 text-blue-300 border-blue-600/30",
+   "CANCELLED": "bg-red-500/20 text-red-400 border-red-600/30",
+};
+const STATUS_LABELS: Record<string, string> = {
+   "CONFIRMED_PREPAID": "Pago Online (Cielo)",
+   "PENDING_PIX": "PIX Aguardando",
+   "CONFIRMED_NON_PREPAID": "Pagar no Balcão",
+   "CANCELLED": "Cancelada / Erro",
+};
+
+export default function PainelReservas() {
+   const [reservations, setReservations] = useState<any[]>([]);
+   const [loading, setLoading] = useState(true);
+   const [statusFilter, setStatusFilter] = useState("ALL");
+   const [search, setSearch] = useState("");
+   const [expandedRow, setExpandedRow] = useState<string | null>(null);
+   const [changingStatus, setChangingStatus] = useState<string | null>(null);
+   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+
+   const showToast = (message: string, type: "success" | "error" = "success") => {
+      setToast({ message, type });
+      setTimeout(() => setToast(null), 3000);
+   };
+
+   const fetchReservations = async () => {
+      setLoading(true);
+      try {
+         const params = new URLSearchParams();
+         if (statusFilter !== "ALL") params.set("status", statusFilter);
+         if (search) params.set("search", search);
+         const res = await fetch(`/api/admin/reservations?${params}`);
+         const data = await res.json();
+         setReservations(Array.isArray(data) ? data : []);
+      } catch (e) {
+         console.error(e);
+      } finally {
+         setLoading(false);
+      }
+   };
+
+   useEffect(() => { fetchReservations(); }, [statusFilter]);
+
+   const handleSearch = (e: React.FormEvent) => {
+      e.preventDefault();
+      fetchReservations();
+   };
+
+   const handleChangeStatus = async (id: string, newStatus: string) => {
+      if (!confirm(`Deseja alterar o status desta reserva para "${STATUS_LABELS[newStatus] || newStatus}"?`)) return;
+      
+      try {
+         const res = await fetch(`/api/admin/reservations/${id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status: newStatus }),
+         });
+         if (res.ok) {
+            showToast("Status atualizado!");
+            fetchReservations();
+            setChangingStatus(null);
+         } else {
+            showToast("Erro ao atualizar", "error");
+         }
+      } catch (e) {
+         showToast("Erro de conexão", "error");
+      }
+   };
+
+   const handleDelete = async (id: string) => {
+      if (!confirm("Tem certeza que deseja EXCLUIR permanentemente esta reserva?")) return;
+      try {
+         const res = await fetch(`/api/admin/reservations/${id}`, { method: "DELETE" });
+         if (res.ok) {
+            showToast("Reserva excluída!");
+            fetchReservations();
+         } else {
+            showToast("Erro ao excluir", "error");
+         }
+      } catch (e) {
+         showToast("Erro de conexão", "error");
+      }
+   };
+
+   // Count by status
+   const counts: Record<string, number> = { ALL: reservations.length };
+   reservations.forEach(r => { counts[r.status] = (counts[r.status] || 0) + 1; });
+
+   return (
+      <div className="space-y-6">
+         {/* Toast */}
+         {toast && (
+            <div className={`fixed top-4 right-4 z-50 px-5 py-3 rounded-lg shadow-2xl font-bold text-sm animate-pulse ${
+               toast.type === "success" ? "bg-green-600 text-white" : "bg-red-600 text-white"
+            }`}>
+               {toast.message}
+            </div>
+         )}
+
+         {/* Header */}
+         <div>
+            <h1 className="text-2xl font-black text-white">Gestão de Reservas</h1>
+            <p className="text-gray-400 text-sm mt-1">Todas as reservas do sistema — pagas, pendentes e canceladas</p>
+         </div>
+
+         {/* Status Filter Tabs */}
+         <div className="flex flex-wrap gap-2">
+            {STATUS_OPTIONS.map(opt => (
+               <button
+                  key={opt.value}
+                  onClick={() => setStatusFilter(opt.value)}
+                  className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${
+                     statusFilter === opt.value
+                        ? `${opt.color} ring-1 ring-current scale-105`
+                        : "bg-gray-800 text-gray-500 hover:text-gray-300"
+                  }`}
+               >
+                  {opt.label} {counts[opt.value] !== undefined ? `(${counts[opt.value]})` : ""}
+               </button>
+            ))}
+         </div>
+
+         {/* Search */}
+         <form onSubmit={handleSearch} className="flex gap-3">
+            <div className="relative flex-1">
+               <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+               </svg>
+               <input
+                  type="text"
+                  placeholder="Buscar por código de reserva ou ID..."
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  className="w-full bg-gray-900 border border-gray-800 rounded-lg pl-10 pr-4 py-2.5 text-sm text-white placeholder-gray-500 outline-none focus:border-green-600 transition-colors"
+               />
+            </div>
+            <button type="submit" className="bg-green-600 hover:bg-green-700 text-white font-bold px-5 py-2.5 rounded-lg text-sm transition-colors">
+               Buscar
+            </button>
+         </form>
+
+         {/* Reservations Table */}
+         <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+            <div className="overflow-x-auto">
+               <table className="w-full text-sm text-left">
+                  <thead className="bg-gray-800/50 border-b border-gray-700">
+                     <tr>
+                        <th className="px-5 py-4 text-[10px] font-bold text-gray-400 uppercase tracking-wider">Reserva</th>
+                        <th className="px-5 py-4 text-[10px] font-bold text-gray-400 uppercase tracking-wider">Cliente</th>
+                        <th className="px-5 py-4 text-[10px] font-bold text-gray-400 uppercase tracking-wider">Veículo</th>
+                        <th className="px-5 py-4 text-[10px] font-bold text-gray-400 uppercase tracking-wider">Valor</th>
+                        <th className="px-5 py-4 text-[10px] font-bold text-gray-400 uppercase tracking-wider">Status</th>
+                        <th className="px-5 py-4 text-[10px] font-bold text-gray-400 uppercase tracking-wider">Data</th>
+                        <th className="px-5 py-4 text-[10px] font-bold text-gray-400 uppercase tracking-wider text-right">Ações</th>
+                     </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-800/50">
+                     {loading && (
+                        <tr><td colSpan={7} className="text-center py-10">
+                           <div className="w-8 h-8 border-4 border-green-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
+                        </td></tr>
+                     )}
+                     {!loading && reservations.length === 0 && (
+                        <tr><td colSpan={7} className="text-center py-10 text-gray-500">Nenhuma reserva encontrada.</td></tr>
+                     )}
+                     {!loading && reservations.map(res => {
+                        let parsed: any = {};
+                        try { parsed = typeof res.customerData === "string" ? JSON.parse(res.customerData) : res.customerData; } catch(e){}
+                        const isExpanded = expandedRow === res.id;
+
+                        return (
+                           <tr key={res.id} className="hover:bg-gray-800/30 transition-colors group">
+                              <td className="px-5 py-4">
+                                 <div className="font-black text-white text-base">{res.resNumber || "—"}</div>
+                                 <div className="text-[10px] text-gray-600 font-mono">{res.merchantOrderId?.slice(0, 12)}...</div>
+                              </td>
+                              <td className="px-5 py-4">
+                                 <div className="font-bold text-white">{parsed?.nome || "—"} {parsed?.sobrenome || ""}</div>
+                                 <div className="text-xs text-gray-500">{parsed?.email || "—"}</div>
+                                 <div className="text-[10px] text-gray-600">{parsed?.cpf} • {parsed?.telefone}</div>
+                              </td>
+                              <td className="px-5 py-4">
+                                 <div className="font-bold text-white text-xs uppercase">{parsed?.booking?.car?.name || "—"}</div>
+                              </td>
+                              <td className="px-5 py-4">
+                                 <div className="font-bold text-green-400">R$ {((parsed?.booking?.totalDay || 0) * 22).toFixed(2)}</div>
+                                 <div className="text-[10px] text-gray-600">R$ {(parsed?.booking?.totalDay || 0).toFixed(2)}/dia</div>
+                              </td>
+                              <td className="px-5 py-4">
+                                 {changingStatus === res.id ? (
+                                    <div className="space-y-1">
+                                       {["CONFIRMED_PREPAID", "CONFIRMED_NON_PREPAID", "PENDING_PIX", "CANCELLED"].map(s => (
+                                          <button key={s} onClick={() => handleChangeStatus(res.id, s)} className={`block w-full text-left px-2 py-1 rounded text-[10px] font-bold ${STATUS_COLORS[s] || "bg-gray-700 text-gray-300"} hover:opacity-80`}>
+                                             {STATUS_LABELS[s]}
+                                          </button>
+                                       ))}
+                                       <button onClick={() => setChangingStatus(null)} className="text-[10px] text-gray-500 hover:text-gray-300 w-full text-left px-2">Cancelar</button>
+                                    </div>
+                                 ) : (
+                                    <button onClick={() => setChangingStatus(res.id)} className={`text-[10px] font-bold uppercase px-2.5 py-1.5 rounded border ${STATUS_COLORS[res.status] || "bg-gray-700 text-gray-300 border-gray-600"} hover:opacity-80 transition-opacity cursor-pointer`}>
+                                       {STATUS_LABELS[res.status] || res.status}
+                                    </button>
+                                 )}
+                              </td>
+                              <td className="px-5 py-4 text-xs text-gray-500">
+                                 {new Date(res.createdAt).toLocaleDateString("pt-BR")}
+                                 <br />
+                                 <span className="text-[10px]">{new Date(res.createdAt).toLocaleTimeString("pt-BR")}</span>
+                              </td>
+                              <td className="px-5 py-4 text-right">
+                                 <button onClick={() => handleDelete(res.id)} className="p-1.5 rounded-lg bg-gray-800 hover:bg-red-900/50 text-gray-400 hover:text-red-400 transition-colors" title="Excluir reserva">
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                                 </button>
+                              </td>
+                           </tr>
+                        );
+                     })}
+                  </tbody>
+               </table>
+            </div>
+         </div>
+      </div>
+   );
+}

@@ -1,0 +1,158 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model ContentBlock {
+  id         String   @id @default(uuid())
+  key        String   @unique
+  value_ptBR String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model MediaAsset {
+  id        String   @id @default(uuid())
+  name      String
+  url       String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model XRSConfig {
+  id         String   @id @default(uuid())
+  callerCode String
+  password   String
+  updatedAt  DateTime @updatedAt
+}
+
+model CieloConfig {
+  id          String   @id @default(uuid())
+  merchantId  String
+  merchantKey String
+  isSandbox   Boolean  @default(true)
+  updatedAt   DateTime @updatedAt
+}
+
+model LocalReservation {
+  id              String   @id @default(uuid())
+  resNumber       String?  @unique
+  merchantOrderId String   @unique
+  customerData    Json
+  status          String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model LogXRS {
+  id          String   @id @default(uuid())
+  action      String   // e.g. "getMultipleRates", "bookReservation"
+  sourceFile  String   // e.g. "getMultipleRates/route.ts"
+  endpoint    String   // XRS URL called
+  xmlRequest  String   // full XML sent
+  xmlResponse String   // full XML received
+  httpStatus  Int?     // HTTP status code
+  durationMs  Int?     // response time in ms
+  hasError    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+}
+
+model LogCielo {
+  id        String   @id @default(uuid())
+  endpoint  String
+  payload   String
+  response  String
+  createdAt DateTime @default(now())
+}
+
+model CityStationOverride {
+  id           String @id @default(uuid())
+  stationCode  String @unique
+  friendlyName String
+}
+
+// NextAuth Models
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+  password      String?
+  role          String    @default("USER") // USER or ADMIN
+  status        String    @default("ACTIVE") // ACTIVE or BLOCKED
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime? @default(now()) @updatedAt
+  accounts      Account[]
+  sessions      Session[]
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// System Customizations (Promotions & Extras)
+model Extra {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  pricePerDay Float
+  type        String   // "PROTECTION" or "ADDON"
+  active      Boolean  @default(true)
+  imageUrl    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Promotion {
+  id            String    @id @default(cuid())
+  title         String
+  subtitle      String?
+  description   String?
+  discountValue Float?    // e.g 20 for 20%
+  imageUrl      String?
+  contractID    String?   // Europcar XRS contract code e.g. "45944876"
+  startDate     DateTime?
+  endDate       DateTime?
+  isActive      Boolean   @default(true)
+  status        String    @default("ACTIVE") // ACTIVE, ARCHIVED
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}

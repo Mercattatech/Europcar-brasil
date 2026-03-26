@@ -1,0 +1,22 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --europcar-green-dark: #00702d;
+  --europcar-green: #008d36;
+  --europcar-yellow: #ffcc00;
+  --europcar-yellow-hover: #e5b800;
+}
+
+@layer base {
+  body {
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+}
+
+@layer utilities {
+  .bg-europcar-green { background-color: var(--europcar-green); }
+  .bg-europcar-dark { background-color: var(--europcar-green-dark); }
+  .text-europcar-green { color: var(--europcar-green); }
+}

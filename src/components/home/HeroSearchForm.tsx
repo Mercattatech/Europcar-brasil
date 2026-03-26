@@ -1,0 +1,610 @@
+"use client";
+
+import { useState, useEffect, useRef } from "react";
+
+const TIMES = Array.from({ length: 24 * 4 }).map((_, i) => {
+  const h = Math.floor(i / 4)
+    .toString()
+    .padStart(2, "0");
+  const m = ((i % 4) * 15).toString().padStart(2, "0");
+  return `${h}:${m}`;
+});
+
+const AGES = [
+  ...Array.from({ length: 8 }, (_, i) => 18 + i).map(String),
+  "26+",
+];
+
+const COUNTRIES = [
+  { code: "BR", name: "Brasil", emoji: "🇧🇷" },
+  { code: "AR", name: "Argentina", emoji: "🇦🇷" },
+  { code: "US", name: "Estados Unidos", emoji: "🇺🇸" },
+  { code: "CA", name: "Canadá", emoji: "🇨🇦" },
+  { code: "MX", name: "México", emoji: "🇲🇽" },
+  { code: "AL", name: "Albânia", emoji: "🇦🇱" },
+  { code: "AD", name: "Andorra", emoji: "🇦🇩" },
+  { code: "AM", name: "Armênia", emoji: "🇦🇲" },
+  { code: "AT", name: "Áustria", emoji: "🇦🇹" },
+  { code: "BY", name: "Bielorrússia", emoji: "🇧🇾" },
+  { code: "BE", name: "Bélgica", emoji: "🇧🇪" },
+  { code: "BA", name: "Bósnia e Herzegovina", emoji: "🇧🇦" },
+  { code: "BG", name: "Bulgária", emoji: "🇧🇬" },
+  { code: "HR", name: "Croácia", emoji: "🇭🇷" },
+  { code: "CY", name: "Chipre", emoji: "🇨🇾" },
+  { code: "CZ", name: "República Checa", emoji: "🇨🇿" },
+  { code: "DK", name: "Dinamarca", emoji: "🇩🇰" },
+  { code: "EE", name: "Estônia", emoji: "🇪🇪" },
+  { code: "FI", name: "Finlândia", emoji: "🇫🇮" },
+  { code: "FR", name: "França", emoji: "🇫🇷" },
+  { code: "GE", name: "Geórgia", emoji: "🇬🇪" },
+  { code: "DE", name: "Alemanha", emoji: "🇩🇪" },
+  { code: "GR", name: "Grécia", emoji: "🇬🇷" },
+  { code: "HU", name: "Hungria", emoji: "🇭🇺" },
+  { code: "IS", name: "Islândia", emoji: "🇮🇸" },
+  { code: "IE", name: "Irlanda", emoji: "🇮🇪" },
+  { code: "IT", name: "Itália", emoji: "🇮🇹" },
+  { code: "KZ", name: "Cazaquistão", emoji: "🇰🇿" },
+  { code: "XK", name: "Kosovo", emoji: "🇽🇰" },
+  { code: "LV", name: "Letônia", emoji: "🇱🇻" },
+  { code: "LI", name: "Liechtenstein", emoji: "🇱🇮" },
+  { code: "LT", name: "Lituânia", emoji: "🇱🇹" },
+  { code: "LU", name: "Luxemburgo", emoji: "🇱🇺" },
+  { code: "MT", name: "Malta", emoji: "🇲🇹" },
+  { code: "MD", name: "Moldávia", emoji: "🇲🇩" },
+  { code: "MC", name: "Mônaco", emoji: "🇲🇨" },
+  { code: "ME", name: "Montenegro", emoji: "🇲🇪" },
+  { code: "NL", name: "Países Baixos", emoji: "🇳🇱" },
+  { code: "MK", name: "Macedônia do Norte", emoji: "🇲🇰" },
+  { code: "NO", name: "Noruega", emoji: "🇳🇴" },
+  { code: "PL", name: "Polônia", emoji: "🇵🇱" },
+  { code: "PT", name: "Portugal", emoji: "🇵🇹" },
+  { code: "RO", name: "Romênia", emoji: "🇷🇴" },
+  { code: "RU", name: "Rússia", emoji: "🇷🇺" },
+  { code: "SM", name: "San Marino", emoji: "🇸🇲" },
+  { code: "RS", name: "Sérvia", emoji: "🇷🇸" },
+  { code: "SK", name: "Eslováquia", emoji: "🇸🇰" },
+  { code: "SI", name: "Eslovênia", emoji: "🇸🇮" },
+  { code: "ES", name: "Espanha", emoji: "🇪🇸" },
+  { code: "SE", name: "Suécia", emoji: "🇸🇪" },
+  { code: "CH", name: "Suíça", emoji: "🇨🇭" },
+  { code: "TR", name: "Turquia", emoji: "🇹🇷" },
+  { code: "UA", name: "Ucrânia", emoji: "🇺🇦" },
+  { code: "GB", name: "Reino Unido", emoji: "🇬🇧" },
+  { code: "VA", name: "Vaticano", emoji: "🇻🇦" },
+];
+
+export default function HeroSearchForm() {
+  const [pickupLocation, setPickupLocation] = useState("");
+  const [stationQuery, setStationQuery] = useState("");
+  const [stations, setStations] = useState<any[]>([]);
+  const [showStationsList, setShowStationsList] = useState(false);
+  const [hoveredStation, setHoveredStation] = useState<any>(null);
+
+  const [returnLocation, setReturnLocation] = useState("");
+  const [pickupDate, setPickupDate] = useState("");
+  const [pickupTime, setPickupTime] = useState("10:00");
+  const [returnDate, setReturnDate] = useState("");
+  const [returnTime, setReturnTime] = useState("10:00");
+
+  const [age, setAge] = useState("26+");
+  const [country, setCountry] = useState("BR");
+  const [sameReturnLocation, setSameReturnLocation] = useState(true);
+
+  // Tarifa Popover
+  const [showTariffPopover, setShowTariffPopover] = useState(false);
+  const [tarifNumber, setTarifNumber] = useState("");
+  const popoverRef = useRef<HTMLDivElement>(null);
+
+  // Date Picker Custom Popover
+  const [showDatePicker, setShowDatePicker] = useState(false);
+
+  // Fetch stations on type
+  useEffect(() => {
+    if (stationQuery.length > 2) {
+      const fetchStations = async () => {
+        try {
+          const res = await fetch(
+            `/api/europcar/getStations?q=${stationQuery}`,
+          );
+          const data = await res.json();
+          setStations(data.stations || []);
+          setShowStationsList(true);
+          if (data.stations && data.stations.length > 0) {
+             setHoveredStation(data.stations[0]);
+          }
+        } catch (e) {
+          console.error(e);
+        }
+      };
+      const debounce = setTimeout(fetchStations, 300);
+      return () => clearTimeout(debounce);
+    } else {
+      setShowStationsList(false);
+      setHoveredStation(null);
+    }
+  }, [stationQuery]);
+
+  // Handle outside click popovers
+  useEffect(() => {
+    function handleClickOutside(event: any) {
+      if (popoverRef.current && !popoverRef.current.contains(event.target)) {
+        setShowTariffPopover(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const handleSearch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!pickupLocation) {
+      return alert("Selecione um local válido da lista");
+    }
+    try {
+      const formatXrsDate = (d: string) => d.replace(/-/g, "");
+      const formatXrsTime = (t: string) => t.replace(":", "");
+
+      const payload = {
+        pickupStation: pickupLocation,
+        returnStation: sameReturnLocation
+          ? pickupLocation
+          : returnLocation || pickupLocation,
+        pickupDate: formatXrsDate(pickupDate),
+        pickupTime: formatXrsTime(pickupTime),
+        returnDate: formatXrsDate(returnDate),
+        returnTime: formatXrsTime(returnTime),
+      };
+
+      const res = await fetch("/api/europcar/getCarCategories", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      await res.json();
+      window.location.href = `/reservation/vehicles?pickup=${pickupLocation}&date=${formatXrsDate(pickupDate)}`;
+    } catch (err) {
+      console.error("Erro na busca XRS", err);
+      alert("Erro ao consultar veículos. Verifique o log.");
+    }
+  };
+
+  const selectedCountryEmoji =
+    COUNTRIES.find((c) => c.code === country)?.emoji || "🌎";
+
+  return (
+    <div className="bg-white rounded-xl shadow-[0_10px_40px_rgba(0,0,0,0.2)] overflow-visible p-6 md:p-8 relative mt-0">
+      <h2 className="text-gray-900 font-bold mb-4 text-base md:text-lg">
+        Qual tipo de veículo?
+      </h2>
+
+      {/* Veículo Type Tabs */}
+      <div className="flex gap-0 border border-gray-300 rounded inline-flex mb-8">
+        <button
+          type="button"
+          className="bg-[#008d36] text-white font-bold px-6 py-2 text-sm rounded-l shadow-sm flex items-center gap-2"
+        >
+          🚗 Carro
+        </button>
+        <button
+          type="button"
+          className="bg-white text-gray-700 font-bold px-6 py-2 text-sm rounded-r hover:bg-gray-50 flex items-center gap-2"
+        >
+          🚐 Furgões e caminhões
+        </button>
+      </div>
+
+      <form onSubmit={handleSearch}>
+        {/* Main Grid Filters */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+          {/* Pickup Location */}
+          <div className="lg:col-span-2 relative">
+            <div className="flex justify-between items-center mb-2">
+              <label className="text-sm font-bold text-gray-900">
+                Local de retirada e devolução
+              </label>
+              <label className="text-xs text-gray-400 font-bold flex items-center gap-1 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="accent-[#008d36] w-4 h-4 rounded text-[#008d36] focus:ring-[#008d36] opacity-80"
+                  checked={sameReturnLocation}
+                  onChange={(e) => setSameReturnLocation(e.target.checked)}
+                />{" "}
+                Mesmo local de devolução
+              </label>
+            </div>
+
+            <div className="relative">
+              <span className="absolute left-3 top-3.5 text-[#008d36]">
+                <svg
+                  className="w-6 h-6"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"
+                  ></path>
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"
+                  ></path>
+                </svg>
+              </span>
+              <input
+                type="text"
+                placeholder="Cidade, endereço, ponto de interesse"
+                className="w-full pl-11 p-4 bg-white border border-gray-300 rounded-lg focus:ring-1 focus:ring-[#008d36] focus:border-[#008d36] outline-none text-base font-medium transition-all text-gray-900 placeholder-gray-400"
+                value={stationQuery}
+                onChange={(e) => {
+                  setStationQuery(e.target.value);
+                  if (!e.target.value) setPickupLocation("");
+                }}
+                required
+              />
+
+              {/* Dropdown Autocomplete - Detailed Panel */}
+              {showStationsList && stations.length > 0 && (
+                <div className="absolute top-full left-0 w-full md:w-[760px] mt-2 bg-white flex shadow-2xl rounded-lg z-50 h-[380px] overflow-hidden border border-gray-200">
+                  {/* List part */}
+                  <div className="w-full md:w-[380px] flex flex-col border-r border-gray-200">
+                     <div className="bg-gray-50 font-bold text-[10px] text-gray-500 px-4 py-2 border-b border-gray-200 tracking-wider">
+                         EUROPCAR STATION
+                     </div>
+                     <div className="flex-1 overflow-y-auto">
+                        {stations.map((station) => (
+                          <div
+                            key={station.code}
+                            className={`px-4 py-4 cursor-pointer text-sm border-b border-gray-100 flex items-center gap-3 transition-colors ${hoveredStation?.code === station.code ? 'bg-gray-100' : 'hover:bg-gray-50 text-gray-700'}`}
+                            onMouseEnter={() => setHoveredStation(station)}
+                            onClick={() => {
+                              setPickupLocation(station.code);
+                              setStationQuery(`${station.name}`);
+                              setShowStationsList(false);
+                            }}
+                          >
+                            {station.type === 'airport' ? (
+                               <svg className="w-5 h-5 text-gray-500" fill="currentColor" viewBox="0 0 24 24"><path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/></svg>
+                            ) : (
+                               <svg className="w-5 h-5 text-gray-500" fill="currentColor" viewBox="0 0 24 24"><path d="M15 11V5l-3-3-3 3v2H3v14h18V11h-6zm-8 8H5v-2h2v2zm0-4H5v-2h2v2zm0-4H5V9h2v2zm6 8h-2v-2h2v2zm0-4h-2v-2h2v2zm0-4h-2V9h2v2zm0-4h-2V5h2v2zm6 12h-2v-2h2v2zm0-4h-2v-2h2v2z"/></svg>
+                            )}
+                            <span className="font-extrabold text-sm uppercase text-gray-900 leading-snug">
+                              {station.name}
+                            </span>
+                          </div>
+                        ))}
+                     </div>
+                  </div>
+
+                  {/* Details part */}
+                  {hoveredStation && (
+                     <div className="hidden md:flex flex-col w-[380px] bg-[#f9f9f9] overflow-y-auto relative p-6">
+                        <h3 className="font-extrabold text-sm uppercase text-black max-w-[80%] leading-tight">
+                            {hoveredStation.name}
+                        </h3>
+                        <p className="text-[11px] font-medium text-gray-500 mt-1 whitespace-pre-wrap leading-tight">
+                            {hoveredStation.address}
+                        </p>
+                        
+                        <div className="mt-4 flex flex-col gap-2">
+                           {hoveredStation.features?.map((f: string, i: number) => (
+                              <div key={i} className="flex items-start gap-1">
+                                  <svg className="w-4 h-4 text-[#008d36] font-bold shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"></path></svg>
+                                  <span className="text-xs font-bold text-black">{f}</span>
+                              </div>
+                           ))}
+                        </div>
+
+                        {hoveredStation.hours?.length > 0 && (
+                           <div className="flex flex-col gap-2 mt-6">
+                              {hoveredStation.hours.map((h: any, i: number) => (
+                                 <div key={i} className="flex text-xs font-bold w-full">
+                                    <span className="w-12 text-black">{h.day}:</span>
+                                    <span className="text-gray-500 whitespace-pre-wrap">{h.hours}</span>
+                                 </div>
+                              ))}
+                           </div>
+                        )}
+                        
+                        {/* Fake map snippet bottom right corner */}
+                        <div className="absolute bottom-0 right-0 w-32 h-32 opacity-40 mix-blend-multiply pointer-events-none" style={{ backgroundImage: 'url(https://maps.googleapis.com/maps/api/staticmap?center=-23.4287,-46.4735&zoom=12&size=400x400&sensor=false)', backgroundSize: 'cover' }}></div>
+                     </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Pickup Date / Time */}
+          <div className="relative">
+            <label className="text-sm font-bold text-gray-900 block mb-2">
+              Data e hora de retirada
+            </label>
+            <div className={`flex border rounded-lg overflow-hidden transition-colors border-gray-300 focus-within:border-[#008d36] focus-within:ring-1 focus-within:ring-[#008d36]`}>
+              <div className="flex-1 flex items-center bg-white px-3 border-r border-gray-200">
+                <input
+                  type="date"
+                  className="w-full py-3 bg-transparent outline-none text-sm font-bold text-gray-900 cursor-pointer"
+                  value={pickupDate}
+                  onChange={(e) => setPickupDate(e.target.value)}
+                  required
+                />
+              </div>
+              <select
+                className="w-20 px-2 py-3 bg-white border-l-0 outline-none text-sm text-gray-900 font-bold"
+                value={pickupTime}
+                onChange={(e) => setPickupTime(e.target.value)}
+              >
+                {TIMES.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Return Date / Time */}
+          <div>
+            <label className="text-sm font-bold text-gray-900 block mb-2">
+              Data e hora de devolução
+            </label>
+            <div className={`flex border rounded-lg overflow-hidden transition-colors border-gray-300 focus-within:border-[#008d36] focus-within:ring-1 focus-within:ring-[#008d36]`}>
+              <div className="flex-1 flex items-center bg-white px-3 border-r border-gray-200">
+                <input
+                  type="date"
+                  className="w-full py-3 bg-transparent outline-none text-sm font-bold text-gray-900 cursor-pointer"
+                  value={returnDate}
+                  onChange={(e) => setReturnDate(e.target.value)}
+                  min={pickupDate}
+                  required
+                />
+              </div>
+              <select
+                className="w-20 px-2 py-3 bg-white border-l-0 outline-none text-sm text-gray-900 font-bold"
+                value={returnTime}
+                onChange={(e) => setReturnTime(e.target.value)}
+              >
+                {TIMES.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        {/* Footer Actions */}
+        <div className="flex flex-col md:flex-row justify-between items-center gap-6 mt-8">
+          <div className="flex gap-8 items-center w-auto">
+            {/* Idade Dropdown */}
+            <div className="flex items-center gap-1 cursor-pointer text-sm relative group">
+              <span className="font-bold text-gray-500">Tenho </span>
+              <select
+                value={age}
+                onChange={(e) => setAge(e.target.value)}
+                className="text-gray-900 font-bold bg-transparent border-none appearance-none outline-none pr-4 cursor-pointer"
+                style={{ WebkitAppearance: "none", background: "transparent" }}
+              >
+                {AGES.map((a) => (
+                  <option key={a} value={a}>
+                    {a}
+                  </option>
+                ))}
+              </select>
+              <svg
+                className="w-4 h-4 text-[#008d36] absolute right-0 pointer-events-none"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="3"
+                  d="M19 9l-7 7-7-7"
+                ></path>
+              </svg>
+            </div>
+
+            {/* País Dropdown */}
+            <div className="flex items-center gap-1 cursor-pointer text-sm relative group">
+              <span className="font-bold text-gray-500 whitespace-nowrap">
+                Eu resido em{" "}
+              </span>
+
+              <div className="relative flex items-center">
+                <span className="mr-1">{selectedCountryEmoji}</span>
+                <select
+                  value={country}
+                  onChange={(e) => setCountry(e.target.value)}
+                  className="text-gray-900 font-bold bg-transparent border-none appearance-none outline-none pr-4 cursor-pointer"
+                  style={{
+                    WebkitAppearance: "none",
+                    background: "transparent",
+                  }}
+                >
+                  {COUNTRIES.map((c) => (
+                    <option key={c.code} value={c.code}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+                <svg
+                  className="w-4 h-4 text-[#008d36] absolute right-0 pointer-events-none"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="3"
+                    d="M19 9l-7 7-7-7"
+                  ></path>
+                </svg>
+              </div>
+            </div>
+          </div>
+
+          <div
+            className="flex items-center justify-end gap-6 w-full md:w-auto mt-4 md:mt-0 relative"
+            ref={popoverRef}
+          >
+            {/* Tarifa checkbox / label which opens popover */}
+            <div
+              className="flex items-center gap-2 cursor-pointer group select-none"
+              onClick={() => setShowTariffPopover(!showTariffPopover)}
+            >
+              <div
+                className={`w-5 h-5 rounded flex items-center justify-center transition-colors ${tarifNumber || showTariffPopover ? "bg-[#008d36]" : "border border-gray-300"}`}
+              >
+                {(tarifNumber || showTariffPopover) && (
+                  <svg
+                    className="w-3 h-3 text-white"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="3"
+                      d="M5 13l4 4L19 7"
+                    ></path>
+                  </svg>
+                )}
+              </div>
+              <span className="text-[14px] text-gray-500 font-bold">
+                Tenho uma{" "}
+                <span className="text-gray-900">tarifa contratada</span>
+              </span>
+              <svg
+                className="w-4 h-4 text-gray-400 group-hover:text-gray-600"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2"
+                  d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                ></path>
+              </svg>
+            </div>
+
+            {/* Tarifa Popover - Exact match implementation */}
+            {showTariffPopover && (
+              <div className="absolute top-full right-1/2 md:right-0 transform md:translate-x-0 translate-x-1/2 mt-4 w-[350px] bg-white rounded-lg shadow-2xl z-50 overflow-hidden flex flex-col border border-gray-200">
+                <div className="p-5 flex flex-col gap-3">
+                  <h3 className="font-extrabold text-[#000000] text-[16px] leading-[22px]">
+                    Está a viajar em trabalho ou lazer e vai pagar com cartão de
+                    crédito ou charge card
+                  </h3>
+                  <p className="text-[#000000] font-normal text-sm">
+                    Indique a sua tarifa contratada
+                  </p>
+
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 flex border-2 border-[#008d36] rounded px-3 py-2 items-center">
+                      <svg
+                        className="w-5 h-5 text-[#008d36] mr-2"
+                        fill="currentColor"
+                        viewBox="0 0 20 20"
+                      >
+                        <path
+                          d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z"
+                          clipRule="evenodd"
+                          fillRule="evenodd"
+                        ></path>
+                      </svg>
+                      <input
+                        type="text"
+                        placeholder="Insira um número"
+                        value={tarifNumber}
+                        onChange={(e) => setTarifNumber(e.target.value)}
+                        className="w-full text-base font-normal outline-none"
+                        autoFocus
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowTariffPopover(false)}
+                      className="bg-[#ebebeb] hover:bg-gray-200 w-12 h-11 rounded flex justify-center items-center"
+                    >
+                      <svg
+                        className="w-6 h-6 text-black font-bold"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="3"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M14 5l7 7m0 0l-7 7m7-7H3"
+                        ></path>
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="border-t border-gray-200 mt-2 mx-5"></div>
+
+                <div className="p-5 flex flex-col gap-2">
+                  <h3 className="font-extrabold text-[#000000] text-[15px] leading-[21px]">
+                    Está a viajar em trabalho e quer pagar com outro meio de
+                    pagamento ou necessita de um serviço de Entrega/Recolha
+                  </h3>
+                  <a
+                    href="#"
+                    className="font-semibold text-sm text-gray-900 mt-2 flex items-center hover:underline"
+                  >
+                    Ir para acesso de Empresa{" "}
+                    <svg
+                      className="w-5 h-5 ml-1 mt-0.5 font-bold"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M14 5l7 7m0 0l-7 7m7-7H3"
+                      ></path>
+                    </svg>
+                  </a>
+                </div>
+
+                <div className="bg-[#f2f2f2] p-5">
+                  <h3 className="font-extrabold text-[#000000] text-sm">
+                    Tem um código de cupão?
+                  </h3>
+                  <p className="text-gray-600 font-medium text-[13px] leading-snug mt-1">
+                    Se tiver um código de cupão alfanumérico, poderá aplicá-lo
+                    na página de pagamento deste site no ato da reserva.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            <button
+              type="submit"
+              className="w-full md:w-56 bg-[#ffcc00] hover:bg-[#e6b800] text-gray-900 font-black py-4 px-8 rounded transition-colors text-base flex justify-center items-center shadow-md border-0"
+            >
+              Pesquisar
+            </button>
+          </div>
+        </div>
+      </form>
+    </div>
+  );
+}
