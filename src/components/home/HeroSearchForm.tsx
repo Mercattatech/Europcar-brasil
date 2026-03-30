@@ -98,6 +98,18 @@ export default function HeroSearchForm() {
   const [tarifNumber, setTarifNumber] = useState("");
   const popoverRef = useRef<HTMLDivElement>(null);
 
+  // Auto-fill contractID from URL (e.g. when clicking a promotion)
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      const contractFromURL = urlParams.get('contractID');
+      if (contractFromURL) {
+        setTarifNumber(contractFromURL);
+        setShowTariffPopover(true);
+      }
+    }
+  }, []);
+
   // Date Picker Custom Popover
   const [showDatePicker, setShowDatePicker] = useState(false);
 
