@@ -115,7 +115,7 @@ export default function HeroSearchForm() {
       const fetchStations = async () => {
         try {
           const res = await fetch(
-            `/api/europcar/getStations?q=${stationQuery}`,
+            `/api/europcar/getStations?q=${encodeURIComponent(stationQuery)}`,
           );
           const data = await res.json();
           setStations(data.stations || []);
@@ -127,7 +127,7 @@ export default function HeroSearchForm() {
           console.error(e);
         }
       };
-      const debounce = setTimeout(fetchStations, 300);
+      const debounce = setTimeout(fetchStations, 400);
       return () => clearTimeout(debounce);
     } else {
       setShowStationsList(false);
@@ -304,7 +304,7 @@ export default function HeroSearchForm() {
                       {stations.map((station) => (
                         <div
                           key={station.code}
-                          className={`px-4 py-4 cursor-pointer text-sm border-b border-gray-100 flex items-center gap-3 transition-colors ${hoveredStation?.code === station.code ? 'bg-gray-100' : 'hover:bg-gray-50 text-gray-700'}`}
+                          className={`px-4 py-3 cursor-pointer text-sm border-b border-gray-100 flex items-center gap-3 transition-colors ${hoveredStation?.code === station.code ? 'bg-gray-100' : 'hover:bg-gray-50 text-gray-700'}`}
                           onMouseEnter={() => setHoveredStation(station)}
                           onClick={() => {
                             setPickupLocation(station.code);
@@ -313,13 +313,20 @@ export default function HeroSearchForm() {
                           }}
                         >
                           {station.type === 'airport' ? (
-                            <svg className="w-5 h-5 text-gray-500" fill="currentColor" viewBox="0 0 24 24"><path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z" /></svg>
+                            <svg className="w-5 h-5 text-gray-400 shrink-0" fill="currentColor" viewBox="0 0 24 24"><path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z" /></svg>
                           ) : (
-                            <svg className="w-5 h-5 text-gray-500" fill="currentColor" viewBox="0 0 24 24"><path d="M15 11V5l-3-3-3 3v2H3v14h18V11h-6zm-8 8H5v-2h2v2zm0-4H5v-2h2v2zm0-4H5V9h2v2zm6 8h-2v-2h2v2zm0-4h-2v-2h2v2zm0-4h-2V9h2v2zm0-4h-2V5h2v2zm6 12h-2v-2h2v2zm0-4h-2v-2h2v2z" /></svg>
+                            <svg className="w-5 h-5 text-gray-400 shrink-0" fill="currentColor" viewBox="0 0 24 24"><path d="M15 11V5l-3-3-3 3v2H3v14h18V11h-6zm-8 8H5v-2h2v2zm0-4H5v-2h2v2zm0-4H5V9h2v2zm6 8h-2v-2h2v2zm0-4h-2v-2h2v2zm0-4h-2V9h2v2zm0-4h-2V5h2v2zm6 12h-2v-2h2v2zm0-4h-2v-2h2v2z" /></svg>
                           )}
-                          <span className="font-extrabold text-sm uppercase text-gray-900 leading-snug">
-                            {station.name}
-                          </span>
+                          <div className="flex flex-col min-w-0">
+                            <span className="font-extrabold text-xs uppercase text-gray-900 leading-snug truncate">
+                              {station.name}
+                            </span>
+                            {station.country && (
+                              <span className="text-[10px] text-gray-400 font-medium">
+                                {station.country}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -332,6 +339,11 @@ export default function HeroSearchForm() {
                       <h3 className="font-extrabold text-sm uppercase text-black max-w-[80%] leading-tight">
                         {stationDetail?.name || hoveredStation.name}
                       </h3>
+                      {hoveredStation.country && (
+                        <span className="text-[10px] bg-[#008d36]/10 text-[#008d36] font-bold px-2 py-0.5 rounded-full mt-1 w-fit">
+                          {hoveredStation.country}
+                        </span>
+                      )}
 
                       {/* Address */}
                       {(stationDetail?.address || hoveredStation.address) && (
