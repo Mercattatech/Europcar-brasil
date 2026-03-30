@@ -60,6 +60,8 @@ function VehiclesContent() {
   const pickupTime = (searchParams.get("time") || "1000").replace(":", "");
   const returnTime = (searchParams.get("returnTime") || "1000").replace(":", "");
   const contractID = searchParams.get("contractID") || "";
+  const driverCountry = searchParams.get("country") || "BR";
+  const driverCountryName = searchParams.get("countryName") || "Brasil";
 
   // Auto-compute returnDate (+3 days) if not in URL
   const returnDate = useMemo(() => {
@@ -467,7 +469,7 @@ function VehiclesContent() {
                           </div>
                           <span className="text-xs text-gray-400 mb-3">Base: {currency} {fmtPrice(basePrice)}</span>
                           {car.bookingCurrencyOfTotalRateEstimate && car.bookingCurrencyOfTotalRateEstimate !== currency && (
-                            <span className="text-xs text-gray-500 mb-2">≈ {car.bookingCurrencyOfTotalRateEstimate} {fmtPrice(car.totalRateEstimateInBookingCurrency)}</span>
+                            <span className="text-xs text-gray-500 mb-2">≈ R$ {fmtPrice(car.totalRateEstimateInBookingCurrency)}</span>
                           )}
                           <button
                             onClick={() => handleSelectCar(car)}
@@ -500,7 +502,7 @@ function VehiclesContent() {
                 </div>
                 <button
                   onClick={() => {
-                    const payload = { car: selectedCar, extras: selectedExtrasMap, pickupStation, returnStation, pickupDate, returnDate, pickupTime, returnTime, contractID: effectiveContractID };
+                    const payload = { car: selectedCar, extras: selectedExtrasMap, pickupStation, returnStation, pickupDate, returnDate, pickupTime, returnTime, contractID: effectiveContractID, driverCountry, driverCountryName };
                     sessionStorage.setItem("europcar_booking", JSON.stringify(payload));
                     window.location.href = "/checkout";
                   }}
@@ -520,26 +522,51 @@ function VehiclesContent() {
                       const sel = selectedExtrasMap[insId] > 0;
                       const priceEUR = parseFloat(ins.price || "0");
                       const priceBRL = parseFloat(ins.priceInBookingCurrency || "0");
-                      const totalWithIns = parseFloat(ins.rentalPriceAI || "0");
                       const totalWithInsBRL = parseFloat(ins.rentalPriceInBookingCurrencyAI || "0");
                       // Insurance code descriptions
                       const insNames: Record<string, string> = {
-                        PREMIUM: "Cobertura Premium", PREMPRE: "Premium Pré-pago", PREMUP: "Premium Plus",
-                        SPCDW: "Super Proteção CDW", SPTHW: "Super Proteção THW", STHW: "Proteção THW+",
-                        SCDW: "Proteção CDW+", MEDIUM: "Cobertura Média", RSA: "Assistência na Estrada",
-                        APP: "Proteção de Aparência",
+                        // Liability
+                        TPL:    "Seguro de Responsabilidade Civil",
+                        // Damage waivers
+                        LDW:    "Proteção contra Danos e Roubo (LDW)",
+                        CDW:    "Proteção contra Danos por Colisão (CDW)",
+                        THW:    "Proteção contra Roubo (THW)",
+                        SCDW:   "Super Proteção CDW",
+                        SPCDW:  "Super Proteção CDW Premium",
+                        STHW:   "Super Proteção THW",
+                        SPTHW:  "Super Proteção THW Premium",
+                        // Packages
+                        MEDIUM:  "Cobertura Média",
+                        PREMIUM: "Cobertura Premium",
+                        PREMPRE: "Premium Pré-pago",
+                        PREMUP:  "Upgrade Premium",
+                        // Add-ons
+                        RSA:  "Assistência na Estrada (RSA)",
+                        APP:  "Proteção de Aparência",
+                        PAI:  "Proteção de Acidentes Pessoais (PAI)",
+                        PEP:  "Proteção de Efeitos Pessoais (PEP)",
                       };
                       const insDesc: Record<string, string> = {
-                        PREMIUM: "Cobertura total: colisão, roubo, vidros, pneus e mais. Sem franquia.",
-                        PREMPRE: "Cobertura premium pré-paga com desconto. Sem franquia.",
-                        PREMUP: "Upgrade para a maior cobertura disponível. Franquia reduzida.",
-                        SPCDW: "Super CDW: franquia zero em danos à carroceria.",
-                        SPTHW: "Super THW: franquia zero em roubo e danos.",
-                        STHW: `Proteção roubo e dano. Franquia: EUR ${ins.excessWithPOM || "—"}.`,
-                        SCDW: `Proteção colisão e dano. Franquia: EUR ${ins.excessWithPOM || "—"}.`,
-                        MEDIUM: `Cobertura intermediária. Franquia: EUR ${ins.excessWithPOM || "—"}.`,
-                        RSA: "Assistência na estrada 24h incluída.",
-                        APP: "Cobre danos estéticos: arranhões, amassados e rodas.",
+                        // Liability
+                        TPL: "Seguro obrigatório de Responsabilidade Civil perante terceiros. Cobre danos materiais e corporais causados a terceiros em acidentes pelos quais você seja responsável. Não cobre danos ao veículo alugado.",
+                        // Damage waivers
+                        LDW: `Combinação de CDW + THW: limita sua responsabilidade financeira em caso de colisão, danos ao veículo ou roubo/furto. Franquia aplicável: EUR ${ins.excessWithPOM || "—"}.`,
+                        CDW: `Proteção contra Danos por Colisão: reduz sua responsabilidade em caso de danos acidentais ao veículo. Franquia: EUR ${ins.excessWithPOM || "—"}.`,
+                        THW: `Proteção contra Roubo: reduz sua responsabilidade em caso de furto ou roubo do veículo. Franquia: EUR ${ins.excessWithPOM || "—"}.`,
+                        SCDW: "Super CDW: reduz a franquia de colisão e danos a zero. Você não paga nenhum valor adicional em caso de danos ao veículo.",
+                        SPCDW: "Super CDW Premium: franquia zero para danos ao veículo, incluindo danos a pneus, vidros e para-choques. Cobertura máxima contra colisões.",
+                        STHW: "Super THW: reduz a franquia de roubo a zero. Você não paga nenhum valor adicional em caso de furto ou roubo do veículo.",
+                        SPTHW: "Super THW Premium: franquia zero para roubo e furto, com cobertura estendida a acessórios e itens internos do veículo.",
+                        // Packages
+                        MEDIUM: `Cobertura Média: inclui proteção CDW e THW com franquia reduzida, além de cobertura para pneus, vidros e para-brisas. Franquia aplicável: EUR ${ins.excessWithPOM || "—"}.`,
+                        PREMIUM: "Cobertura Premium: proteção completa sem franquia — cobre colisão, roubo, vidros, pneus, para-choques e danos de aparência. Tranquilidade total durante seu aluguel.",
+                        PREMPRE: "Cobertura Premium Pré-paga: todos os benefícios da cobertura premium com desconto ao pagar antecipadamente. Sem franquia. Inclui CDW, THW, vidros, pneus e assistência na estrada.",
+                        PREMUP: "Upgrade para Cobertura Premium: eleva seu plano atual para a proteção máxima disponível, reduzindo ou zerando a franquia vigente e ampliando as coberturas incluídas.",
+                        // Add-ons
+                        RSA: "Assistência na Estrada 24h: suporte imediato em caso de pane, acidente, furo de pneu, falta de combustível ou chaves trancadas no veículo, a qualquer hora e em qualquer lugar.",
+                        APP: "Proteção de Aparência: cobre danos estéticos ao veículo que normalmente não são incluídos no CDW padrão, como arranhões, amassados leves, danos às rodas e para-choques.",
+                        PAI: "Proteção de Acidentes Pessoais: cobre despesas médicas, indenização por morte e invalidez permanente para o condutor e passageiros em caso de acidente durante o aluguel.",
+                        PEP: "Proteção de Efeitos Pessoais: cobre bagagens e pertences pessoais deixados no veículo em caso de roubo ou furto, até o limite especificado em contrato.",
                       };
                       return (
                         <div key={insId} className={`border-2 rounded-lg p-5 transition-colors ${sel ? "border-[#008d36] bg-green-50" : "border-gray-200 hover:border-[#008d36]"}`}>
@@ -551,11 +578,11 @@ function VehiclesContent() {
                           </div>
                           <div className="text-xl font-black text-gray-900 mb-1">
                             EUR {priceEUR.toFixed(2)}
-                            {priceBRL > 0 && <span className="text-sm font-normal text-gray-400 ml-1">(BRL {priceBRL.toFixed(2)})</span>}
+                            {priceBRL > 0 && <span className="text-sm font-normal text-gray-400 ml-1">(R$ {priceBRL.toFixed(2)})</span>}
                             <span className="text-xs text-gray-400 font-normal"> /dia</span>
                           </div>
                           {totalWithInsBRL > 0 && (
-                            <div className="text-xs text-green-700 font-bold mb-1">Total com proteção: BRL {totalWithInsBRL.toFixed(2)}</div>
+                            <div className="text-xs text-green-700 font-bold mb-1">Total com proteção: R$ {totalWithInsBRL.toFixed(2)}</div>
                           )}
                           <p className="text-sm text-gray-500 mb-4">{insDesc[insId] || "Proteção adicional."}</p>
                           <button

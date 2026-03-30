@@ -37,7 +37,7 @@ export async function POST(request: Request) {
         <checkout stationID="${pickupStation}" date="${pickupDate}" time="${pickupTime || '1000'}"/>
         <checkin stationID="${returnStation || pickupStation}" date="${returnDate}" time="${returnTime || '1000'}"/>
       </reservation>
-      <driver countryOfResidence="XX" />
+      <driver countryOfResidence="BR" />
     </serviceParameters>
   </serviceRequest>
 </message>`;

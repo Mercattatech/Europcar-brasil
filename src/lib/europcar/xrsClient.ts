@@ -115,3 +115,122 @@ function getXRSErrors(parsedData: any): any {
   if (parsedData?.Envelope?.Body?.Fault) return parsedData.Envelope.Body.Fault;
   return null;
 }
+
+// =============================
+// XRS Station lookup helpers
+// =============================
+
+export interface Station {
+  prestige: string;
+  stationCode: string;
+  stationName: string;
+  truckAvailable: string;
+  // optional extended fields from getStation response
+  address1?: string;
+  address2?: string;
+  areaType?: string;
+  cityName?: string;
+  collection?: string;
+  countryCode?: string;
+  countryName?: string;
+  county?: string;
+  delivery?: string;
+  email?: string;
+  latitude?: string;
+  longitude?: string;
+  phoneAreaCode?: string;
+  phoneCountryCode?: string;
+  phoneNumber?: string;
+  phoneWithInternationalDialling?: string;
+  postalCode?: string;
+  leadTime?: string;
+  // ... add more as needed
+}
+
+/**
+ * Retrieve list of stations for a given country code.
+ * Example: getStations('BR')
+ */
+export async function getStations(countryCode: string): Promise<Station[]> {
+  const xml = `
+<message>
+  <serviceRequest serviceCode="getStations">
+    <serviceParameters>
+      <station countryCode="${countryCode}"/>
+    </serviceParameters>
+  </serviceRequest>
+</message>`;
+
+  const response = await callXRS(xml, {
+    callerCode: process.env.XRS_CALLER_CODE || '',
+    password: process.env.XRS_PASSWORD || '',
+    action: 'getStations',
+    sourceFile: 'xrsClient.ts',
+  });
+
+  // Parse response structure safely
+  const stations = response?.message?.serviceResponse?.stationList?.station;
+  if (!stations) return [];
+  // The API may return a single object or an array
+  const list = Array.isArray(stations) ? stations : [stations];
+  return list.map((s: any) => ({
+    prestige: s.$?.prestige ?? s.prestige,
+    stationCode: s.$?.stationCode ?? s.stationCode,
+    stationName: s.$?.stationName ?? s.stationName,
+    truckAvailable: s.$?.truckAvailable ?? s.truckAvailable,
+  } as Station));
+}
+
+/**
+ * Retrieve detailed information for a specific station code.
+ */
+export async function getStation(stationCode: string, language: string = 'en_US'): Promise<Station | null> {
+  const xml = `
+<message>
+  <serviceRequest serviceCode="getStation">
+    <serviceContext>
+      <localisation active="true">
+        <language code="${language}"/>
+      </localisation>
+    </serviceContext>
+    <serviceParameters>
+      <station stationCode="${stationCode}"/>
+    </serviceParameters>
+  </serviceRequest>
+</message>`;
+
+  const response = await callXRS(xml, {
+    callerCode: process.env.XRS_CALLER_CODE || '',
+    password: process.env.XRS_PASSWORD || '',
+    action: 'getStation',
+    sourceFile: 'xrsClient.ts',
+  });
+
+  const station = response?.message?.serviceResponse?.station;
+  if (!station) return null;
+  const s = station;
+  return {
+    prestige: s.$?.prestige ?? s.prestige,
+    stationCode: s.$?.stationCode ?? s.stationCode,
+    stationName: s.$?.stationName ?? s.stationName,
+    truckAvailable: s.$?.truckAvailable ?? s.truckAvailable,
+    address1: s.$?.address1 ?? s.address1,
+    address2: s.$?.address2 ?? s.address2,
+    areaType: s.$?.areaType ?? s.areaType,
+    cityName: s.$?.cityName ?? s.cityName,
+    collection: s.$?.collection ?? s.collection,
+    countryCode: s.$?.countryCode ?? s.countryCode,
+    countryName: s.$?.countryName ?? s.countryName,
+    county: s.$?.county ?? s.county,
+    delivery: s.$?.delivery ?? s.delivery,
+    email: s.$?.email ?? s.email,
+    latitude: s.$?.latitude ?? s.latitude,
+    longitude: s.$?.longitude ?? s.longitude,
+    phoneAreaCode: s.$?.phoneAreaCode ?? s.phoneAreaCode,
+    phoneCountryCode: s.$?.phoneCountryCode ?? s.phoneCountryCode,
+    phoneNumber: s.$?.phoneNumber ?? s.phoneNumber,
+    phoneWithInternationalDialling: s.$?.phoneWithInternationalDialling ?? s.phoneWithInternationalDialling,
+    postalCode: s.$?.postalCode ?? s.postalCode,
+    leadTime: s.$?.leadTime ?? s.leadTime,
+  } as Station;
+}

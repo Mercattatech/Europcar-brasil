@@ -100,6 +100,8 @@ export default function CheckoutPage() {
   const returnStation = booking.returnStation || booking.pickupStation || "";
   const pickupDate = booking.pickupDate || "";
   const returnDate = booking.returnDate || "";
+  const driverCountry = booking.driverCountry || "BR";
+  const driverCountryName = booking.driverCountryName || "Brasil";
   const formatDate = (d: string) => d?.length === 8 ? `${d.slice(6, 8)}/${d.slice(4, 6)}/${d.slice(0, 4)}` : d;
 
   // Calculate days
@@ -164,7 +166,12 @@ export default function CheckoutPage() {
   // ---- Confirmation screen ----
   if (resNumber) {
     return (
-      <div className="min-h-screen bg-[#f7f7f7] flex items-center justify-center p-4">
+      <div className="min-h-screen bg-[#f7f7f7] flex flex-col items-center justify-center p-4 gap-6">
+        {/* Logo */}
+        <div className="bg-[#008d36] px-6 py-3 rounded-md shadow-md">
+          <img src="/logo.jpg" alt="Europcar" className="h-10 object-contain" />
+        </div>
+
         <div className="bg-white p-10 rounded-lg shadow-xl max-w-lg w-full text-center border-t-8 border-[#008d36]">
           <div className="w-20 h-20 bg-green-100 text-[#008d36] rounded-full flex items-center justify-center mx-auto mb-6">
             <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
@@ -185,33 +192,166 @@ export default function CheckoutPage() {
   if (merchantOrderId && !resNumber && paymentMethod === "PIX") {
     const minutes = Math.floor(Math.max(0, timeLeft) / 60);
     const seconds = Math.max(0, timeLeft) % 60;
+
+    // Compute total for summary
+    const extrasSumBRL = extrasDetails.reduce((s: number, e: any) => s + e.pricePerDay * e.qty, 0) * days;
+    const baseBRL = totalBRL > 0 ? totalBRL : totalRateXRS;
+    const grandTotal = baseBRL + extrasSumBRL;
+
+    const insNames: Record<string, string> = {
+      TPL: "Resp. Civil (TPL)", LDW: "Danos e Roubo (LDW)",
+      CDW: "Colisão (CDW)", THW: "Roubo (THW)",
+      SCDW: "Super CDW", SPCDW: "Super CDW Premium",
+      STHW: "Super THW", SPTHW: "Super THW Premium",
+      MEDIUM: "Cobertura Média", PREMIUM: "Cobertura Premium",
+      PREMPRE: "Premium Pré-pago", PREMUP: "Upgrade Premium",
+      RSA: "Assistência 24h", APP: "Proteção Aparência",
+      PAI: "Acidentes Pessoais", PEP: "Efeitos Pessoais",
+    };
+
     return (
-      <div className="min-h-screen bg-[#f7f7f7] flex items-center justify-center p-4">
-        <div className="bg-white p-10 rounded-lg shadow-xl max-w-lg w-full text-center border-t-8 border-[#1b75bb]">
-          <h1 className="text-2xl font-black text-gray-900 mb-2">Pague via PIX</h1>
-          <p className="text-gray-600 mb-6 border-b border-gray-100 pb-6">Pedido <strong>{merchantOrderId}</strong>. Escaneie o QR Code para confirmar.</p>
-          <div className="bg-gray-50 rounded-lg p-6 mb-6 inline-block">
-            {timeLeft > 0 ? (
-              <>
-                {pixQrCode ? (
-                  <img src={`https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(pixQrCode)}`} alt="QR Code PIX" className="w-48 h-48 mx-auto mb-4" />
+      <div className="min-h-screen bg-[#f7f7f7] flex flex-col items-center justify-center p-6 gap-6">
+        {/* Logo */}
+        <div className="bg-[#008d36] px-6 py-3 rounded-md shadow-md">
+          <img src="/logo.jpg" alt="Europcar" className="h-10 object-contain" />
+        </div>
+
+        {/* Card — two columns on md+ */}
+        <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl overflow-hidden border-t-8 border-[#1b75bb]">
+          <div className="flex flex-col md:flex-row">
+
+            {/* Left — QR Code */}
+            <div className="flex-1 flex flex-col items-center justify-center p-10 border-b md:border-b-0 md:border-r border-gray-100">
+              <h1 className="text-2xl font-black text-gray-900 mb-1">Pague via PIX</h1>
+              <p className="text-xs text-gray-500 mb-6 text-center">
+                Pedido <strong className="text-gray-700">{merchantOrderId}</strong>.<br />Escaneie o QR Code para confirmar.
+              </p>
+
+              <div className="bg-gray-50 rounded-lg p-4 mb-5">
+                {timeLeft > 0 ? (
+                  <>
+                    {pixQrCode ? (
+                      <img
+                        src={`https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(pixQrCode)}`}
+                        alt="QR Code PIX"
+                        className="w-48 h-48 mx-auto"
+                      />
+                    ) : (
+                      <div className="w-48 h-48 bg-gray-200 animate-pulse flex items-center justify-center text-xs text-gray-500">Gerando...</div>
+                    )}
+                  </>
                 ) : (
-                  <div className="w-48 h-48 bg-gray-200 animate-pulse flex items-center justify-center text-xs text-gray-500 mb-4">Gerando...</div>
+                  <div className="w-48 h-48 flex flex-col items-center justify-center text-red-500">
+                    <span className="font-bold text-lg">QR Code Expirado</span>
+                    <span className="text-xs text-gray-500 mt-1">Refaça a reserva.</span>
+                  </div>
                 )}
-                <span className="text-2xl font-black text-[#1b75bb] tabular-nums">{String(minutes).padStart(2,"0")}:{String(seconds).padStart(2,"0")}</span>
-              </>
-            ) : (
-              <div className="w-48 h-48 flex flex-col items-center justify-center text-red-500">
-                <span className="font-bold text-lg">QR Code Expirado</span>
-                <span className="text-xs text-gray-500 mt-1">Refaça a reserva.</span>
               </div>
-            )}
+
+              {/* Countdown */}
+              {timeLeft > 0 && (
+                <div className="flex items-center gap-2 text-[#1b75bb] mb-6">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <span className="text-xl font-black tabular-nums">
+                    {String(minutes).padStart(2, "0")}:{String(seconds).padStart(2, "0")}
+                  </span>
+                  <span className="text-xs text-gray-400">para expirar</span>
+                </div>
+              )}
+
+              <button
+                onClick={() => window.location.href = "/"}
+                className="w-full bg-[#ffcc00] hover:bg-[#e6b800] text-gray-900 font-bold py-3 rounded text-sm transition-colors"
+              >
+                Já paguei / Voltar
+              </button>
+            </div>
+
+            {/* Right — Booking Summary */}
+            <div className="w-full md:w-[280px] shrink-0 bg-gray-50 p-8 flex flex-col gap-4">
+              <h2 className="text-xs font-black text-gray-500 uppercase tracking-widest border-b border-gray-200 pb-3">
+                Resumo do Pagamento
+              </h2>
+
+              {/* Vehicle */}
+              <div className="flex flex-col gap-0.5">
+                <span className="text-[10px] font-bold text-[#008d36] uppercase tracking-wider">Veículo</span>
+                <span className="font-black text-gray-900 text-sm uppercase leading-tight">{carName}</span>
+                {carSample && <span className="text-xs text-gray-400">{carSample} ou similar</span>}
+                {carCode && (
+                  <span className="text-[10px] bg-gray-200 text-gray-600 font-bold px-2 py-0.5 rounded-full w-fit mt-0.5">{carCode}</span>
+                )}
+              </div>
+
+              {/* Locations */}
+              <div className="flex flex-col gap-1 border-t border-gray-200 pt-3">
+                <div className="flex justify-between text-xs">
+                  <span className="text-gray-500 font-bold">Retirada</span>
+                  <span className="font-black text-gray-900 text-right">
+                    {pickupStation}<br />
+                    <span className="font-normal text-gray-500">{formatDate(pickupDate)}</span>
+                  </span>
+                </div>
+                <div className="flex justify-between text-xs mt-1">
+                  <span className="text-gray-500 font-bold">Devolução</span>
+                  <span className="font-black text-gray-900 text-right">
+                    {returnStation || pickupStation}<br />
+                    <span className="font-normal text-gray-500">{formatDate(returnDate)}</span>
+                  </span>
+                </div>
+                <div className="flex justify-between text-xs mt-1">
+                  <span className="text-gray-500 font-bold">Duração</span>
+                  <span className="font-black text-gray-900">{days} {days === 1 ? "dia" : "dias"}</span>
+                </div>
+              </div>
+
+              {/* Price breakdown */}
+              <div className="flex flex-col gap-1 border-t border-gray-200 pt-3 text-xs">
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Aluguel ({currency})</span>
+                  <span className="font-bold text-gray-900">{currency} {totalRateXRS.toFixed(2).replace(".", ",")}</span>
+                </div>
+                {totalBRL > 0 && (
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Em BRL</span>
+                    <span className="font-bold text-gray-900">R$ {totalBRL.toFixed(2).replace(".", ",")}</span>
+                  </div>
+                )}
+
+                {/* Extras */}
+                {extrasDetails.length > 0 && (
+                  <>
+                    <div className="text-[10px] font-bold text-[#008d36] uppercase mt-2 mb-1">Proteções adicionadas</div>
+                    {extrasDetails.map((extra: any) => (
+                      <div key={extra.id} className="flex justify-between">
+                        <span className="text-gray-500">{insNames[extra.id] || extra.id}</span>
+                        <span className="font-bold text-gray-900">
+                          R$ {(extra.pricePerDay * extra.qty * days).toFixed(2).replace(".", ",")}
+                        </span>
+                      </div>
+                    ))}
+                  </>
+                )}
+              </div>
+
+              {/* Grand total */}
+              <div className="bg-[#008d36] rounded-lg p-4 mt-auto">
+                <div className="text-[10px] font-bold text-green-200 uppercase mb-1">Total a pagar</div>
+                <div className="text-2xl font-black text-white">
+                  R$ {grandTotal.toFixed(2).replace(".", ",")}
+                </div>
+                <div className="text-[10px] text-green-200 mt-0.5">Taxas e impostos incluídos</div>
+              </div>
+            </div>
+
           </div>
-          <button onClick={() => window.location.href = "/"} className="w-full bg-[#ffcc00] hover:bg-[#e6b800] text-gray-900 font-bold py-3 rounded text-sm">Já paguei / Voltar</button>
         </div>
       </div>
     );
   }
+
 
   // ---- Main checkout ----
   return (
@@ -368,6 +508,13 @@ export default function CheckoutPage() {
                   <span className="text-gray-500 font-bold">Devolução</span>
                   <span className="font-black text-gray-900 text-right text-xs uppercase">
                     {returnStation || pickupStation}<br />{formatDate(returnDate)}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-500 font-bold">País de residência</span>
+                  <span className="font-black text-gray-900 text-right text-xs flex items-center gap-1">
+                    <span className="bg-gray-100 text-gray-600 font-bold px-1.5 py-0.5 rounded text-[10px]">{driverCountry}</span>
+                    {driverCountryName}
                   </span>
                 </div>
               </div>

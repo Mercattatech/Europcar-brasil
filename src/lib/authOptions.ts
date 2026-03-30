@@ -1,11 +1,11 @@
+import { PrismaAdapter } from "@auth/prisma-adapter";
 import { type NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
-import prisma from "./prisma";
-import bcrypt from "bcryptjs";
+import prisma from "./prisma"; // Assuming we have a global prisma client exported here
+import bcrypt from "bcrypt";
 
 export const authOptions: NextAuthOptions = {
-  // Sem PrismaAdapter — usamos JWT puro, não precisa de DB para sessões
-  // Isso garante que NextAuth funcione mesmo se Supabase estiver fora
+  adapter: PrismaAdapter(prisma) as any,
   session: {
     strategy: "jwt",
   },
@@ -26,18 +26,18 @@ export const authOptions: NextAuthOptions = {
         });
 
         if (!user || (!user.password && !user.email)) {
-           throw new Error("Usuário não encontrado.");
+          throw new Error("Usuário não encontrado.");
         }
 
         if ((user as any).status === "BLOCKED") {
-           throw new Error("Sua conta foi bloqueada. Entre em contato com o suporte.");
+          throw new Error("Sua conta foi bloqueada. Entre em contato com o suporte.");
         }
 
         if (user.password) {
-           const isCorrectPassword = await bcrypt.compare(credentials.password, user.password);
-           if (!isCorrectPassword) {
-              throw new Error("Senha incorreta");
-           }
+          const isCorrectPassword = await bcrypt.compare(credentials.password, user.password);
+          if (!isCorrectPassword) {
+            throw new Error("Senha incorreta");
+          }
         }
 
         return user;
@@ -58,7 +58,7 @@ export const authOptions: NextAuthOptions = {
         token.role = (user as any).role;
       }
       if (trigger === "update" && session?.role) {
-         token.role = session.role;
+        token.role = session.role;
       }
       return token;
     }
