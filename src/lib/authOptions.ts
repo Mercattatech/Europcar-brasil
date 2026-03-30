@@ -1,11 +1,11 @@
-import { PrismaAdapter } from "@auth/prisma-adapter";
 import { type NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
-import prisma from "./prisma"; // Assuming we have a global prisma client exported here
+import prisma from "./prisma";
 import bcrypt from "bcrypt";
 
 export const authOptions: NextAuthOptions = {
-  adapter: PrismaAdapter(prisma) as any,
+  // Sem PrismaAdapter — usamos JWT puro, não precisa de DB para sessões
+  // Isso garante que NextAuth funcione mesmo se Supabase estiver fora
   session: {
     strategy: "jwt",
   },

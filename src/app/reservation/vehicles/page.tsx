@@ -76,7 +76,7 @@ function VehiclesContent() {
   // contractID from sessionStorage
   const [sessionContractID, setSessionContractID] = useState("");
   useEffect(() => {
-    try { setSessionContractID(sessionStorage.getItem("europcar_contractID") || ""); } catch {}
+    try { setSessionContractID(sessionStorage.getItem("europcar_contractID") || ""); } catch { }
   }, []);
   const effectiveContractID = contractID || sessionContractID;
 
@@ -89,7 +89,7 @@ function VehiclesContent() {
       .then(d => {
         const s = d.stations?.find((x: any) => x.code === pickupStation);
         if (s) setStationName(s.name);
-      }).catch(() => {});
+      }).catch(() => { });
   }, [pickupStation]);
 
   // XRS cars state
@@ -119,7 +119,6 @@ function VehiclesContent() {
     }
     setLoading(true);
     setError("");
-    console.log("[vehicles] Iniciando busca:", { pickupStation, returnStation, pickupDate, returnDate, pickupTime, returnTime });
     try {
       // Step 1: getCarCategories → get ACRISS codes
       const catRes = await fetch("/api/europcar/getCarCategories", {
@@ -128,29 +127,6 @@ function VehiclesContent() {
         body: JSON.stringify({ pickupStation, returnStation: returnStation || pickupStation, pickupDate, returnDate, pickupTime, returnTime }),
       });
       const catData = await catRes.json();
-      console.log("[vehicles] getCarCategories response:", JSON.stringify(catData).substring(0, 500));
-
-      // Detect KO response from XRS
-      const catReturnCode =
-        catData?.message?.serviceResponse?.$?.returnCode ||
-        catData?.serviceResponse?.$?.returnCode;
-      if (catReturnCode === "KO") {
-        const errCode =
-          catData?.message?.serviceResponse?.$?.errorCode ||
-          catData?.serviceResponse?.$?.errorCode || "unknown";
-        console.error("[vehicles] XRS getCarCategories KO:", errCode);
-        setError(`Erro da API Europcar (${errCode}). O servidor sandbox pode estar temporariamente indisponível. Tente novamente em alguns minutos.`);
-        setLoading(false);
-        return;
-      }
-
-      // Also check for HTTP-level error from our route
-      if (catData?.error) {
-        console.error("[vehicles] API route error:", catData.error);
-        setError(`Erro interno: ${catData.error}`);
-        setLoading(false);
-        return;
-      }
 
       const rawCatList =
         catData?.message?.serviceResponse?.carCategoryList?.carCategory ||
@@ -160,8 +136,6 @@ function VehiclesContent() {
       const acrissCodes = catList
         .map((c: any) => (c.$ ? c.$.carCategoryCode : c.carCategoryCode))
         .filter(Boolean);
-
-      console.log("[vehicles] ACRISS codes encontrados:", acrissCodes.length, acrissCodes.slice(0, 5));
 
       if (acrissCodes.length === 0) {
         setError("Nenhum veículo disponível para esta estação e período.");
@@ -185,21 +159,11 @@ function VehiclesContent() {
         }),
       });
       const ratesData = await ratesRes.json();
-      console.log("[vehicles] getMultipleRates response keys:", ratesData?.results ? `${ratesData.results.length} chunks` : "no results");
 
       const allRates: any[] = [];
       const chunks = Array.isArray(ratesData.results) ? ratesData.results : [ratesData];
 
       for (const chunk of chunks) {
-        // Check for KO in each chunk
-        const chunkRC =
-          chunk?.message?.serviceResponse?.$?.returnCode ||
-          chunk?.serviceResponse?.$?.returnCode;
-        if (chunkRC === "KO") {
-          console.warn("[vehicles] getMultipleRates chunk KO, skipping");
-          continue;
-        }
-
         const rawList =
           chunk?.message?.serviceResponse?.reservationRateList?.reservationRate ||
           chunk?.serviceResponse?.reservationRateList?.reservationRate || [];
@@ -225,7 +189,6 @@ function VehiclesContent() {
         }
       }
 
-      console.log("[vehicles] Total rates parsed:", allRates.length);
 
       if (allRates.length === 0) {
         setError("Sem tarifas disponíveis para o período selecionado. Tente outras datas.");
@@ -235,13 +198,11 @@ function VehiclesContent() {
 
       setCars(allRates);
     } catch (e: any) {
-      console.error("[vehicles] Erro no fetchCars:", e);
       setError("Erro ao buscar veículos: " + (e.message || "Tente novamente."));
     } finally {
       setLoading(false);
     }
   }, [pickupStation, returnStation, pickupDate, returnDate, pickupTime, returnTime, effectiveContractID]);
-
 
   useEffect(() => { fetchCars(); }, [fetchCars]);
 
