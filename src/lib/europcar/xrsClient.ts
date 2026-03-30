@@ -90,11 +90,15 @@ async function saveLog(data: {
   try {
     await prisma.logXRS.create({
       data: {
-        ...data,
-        // backward-compat aliases (old schema had payload/response)
-        payload: data.xmlRequest,
-        response: data.xmlResponse,
-      } as any
+        action:      data.action,
+        sourceFile:  data.sourceFile,
+        endpoint:    data.endpoint,
+        xmlRequest:  data.xmlRequest,
+        xmlResponse: data.xmlResponse,
+        httpStatus:  data.httpStatus,
+        durationMs:  data.durationMs,
+        hasError:    data.hasError,
+      }
     });
   } catch (e) {
     // Never let logging crash the main flow

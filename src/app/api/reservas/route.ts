@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/authOptions";
 import prisma from '@/lib/prisma';
+export const dynamic = 'force-dynamic';
 
 // Função mock para gerar um Locator de reserva de 8 caracteres
 function gerarLocalizador() {
