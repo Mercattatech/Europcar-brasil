@@ -1,11 +1,12 @@
-import { PrismaAdapter } from "@auth/prisma-adapter";
 import { type NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
-import prisma from "./prisma"; // Assuming we have a global prisma client exported here
+import prisma from "./prisma";
 import bcrypt from "bcrypt";
 
 export const authOptions: NextAuthOptions = {
-  adapter: PrismaAdapter(prisma) as any,
+  // NOTE: PrismaAdapter removed intentionally — with JWT session strategy the adapter
+  // is not required and its presence caused /api/auth/session to return 500 on
+  // serverless cold starts when the DB connection is slow.
   session: {
     strategy: "jwt",
   },
