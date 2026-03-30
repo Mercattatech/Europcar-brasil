@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getStations } from '@/lib/europcar/xrsClient';
+export const dynamic = 'force-dynamic';
 
 // Fallback mock data (used only if XRS call fails)
 const STATIONS_MOCK = [

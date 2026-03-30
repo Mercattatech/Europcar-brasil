@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
+export const dynamic = 'force-dynamic';
 
 function gerarLocalizador() {
    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { callXRS } from '@/lib/europcar/xrsClient';
+export const dynamic = 'force-dynamic';
 
 // Este Route Handler agirá como um BFF (Backend For Frontend),
 // ocultando as credenciais (que devem vir do Prisma/XRSConfig) do navegador do cliente.

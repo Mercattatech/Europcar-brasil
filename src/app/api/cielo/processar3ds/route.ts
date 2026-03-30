@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+export const dynamic = 'force-dynamic';
 
 // Mock SDK ou Client Interno da Cielo
 export async function POST(request: Request) {
