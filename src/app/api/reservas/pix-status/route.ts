@@ -41,8 +41,8 @@ export async function GET(request: Request) {
 
          if (paymentId) {
              const CIELO_API_URL = cieloConfig.isSandbox 
-                ? `https://apisandbox.cieloecommerce.cielo.com.br/1/sales/${paymentId}`
-                : `https://api.cieloecommerce.cielo.com.br/1/sales/${paymentId}`;
+                ? `https://apiquerysandbox.cieloecommerce.cielo.com.br/1/sales/${paymentId}`
+                : `https://apiquery.cieloecommerce.cielo.com.br/1/sales/${paymentId}`;
              const resCielo = await fetch(CIELO_API_URL, {
                  headers: {
                     "MerchantId": cieloConfig.merchantId,

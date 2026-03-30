@@ -1,11 +1,27 @@
 import { NextResponse } from 'next/server';
 
-// Mock DB de estações baseadas em GRUT01, CGH, etc... para a API XRS Europcar
+// ⚠️ SANDBOX: estações brasileiras estão sendo habilitadas pela Europcar.
+// ROMC04 = Bucareste (Romênia) — disponível para teste no CallerCode 1132581.
+// Quando as estações BR forem habilitadas, remover ROMC04.
 const STATIONS_MOCK = [
-   { 
-     code: 'GRUT01', 
-     name: 'GUARULHOS AIRPORT MEET AND GREET', 
-     city: 'Guarulhos', 
+   // === TESTE SANDBOX ===
+   {
+     code: 'ROMC04',
+     name: '[SANDBOX] Bucareste — Teste XRS',
+     city: 'Bucareste (Teste)',
+     country: 'ROMÊNIA',
+     type: 'airport',
+     address: 'Estação de teste — CallerCode 1132581',
+     features: ['Estação sandbox', 'Teste de reservas'],
+     hours: [{ day: 'SEG-DOM', hours: '00:00 - 23:59' }],
+     lat: 44.4268,
+     lng: 26.1025
+   },
+   // === BRASIL (aguardando habilitação pela Europcar) ===
+   {
+     code: 'GRUT01',
+     name: 'GUARULHOS AIRPORT MEET AND GREET',
+     city: 'Guarulhos',
      country: 'BRAZIL',
      type: 'airport',
      address: 'AV LAURO DE GUSMAO VIEIRA 1125\n07140 010 SAO PAULO\nBRAZIL',
@@ -19,10 +35,10 @@ const STATIONS_MOCK = [
      lat: -23.4287,
      lng: -46.4735
    },
-   { 
-     code: 'CGHT01', 
-     name: 'GUARULHOS DOWNTOWN', 
-     city: 'Guarulhos', 
+   {
+     code: 'CGHT01',
+     name: 'GUARULHOS DOWNTOWN',
+     city: 'Guarulhos',
      country: 'BRAZIL',
      type: 'downtown',
      address: 'Av. Tiradentes, 1234\nGuarulhos, SP\nBRAZIL',

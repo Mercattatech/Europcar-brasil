@@ -55,8 +55,10 @@ export async function callXRS(
       hasError = true;
     }
 
-    // Save full log to DB
-    await saveLog({ action, sourceFile, endpoint: url, xmlRequest, xmlResponse: rawResponse, httpStatus, durationMs, hasError });
+    // Fire-and-forget: NUNCA bloquear a resposta da API por causa do log
+    // Se o Supabase estiver fora, a reserva continua funcionando normalmente
+    saveLog({ action, sourceFile, endpoint: url, xmlRequest, xmlResponse: rawResponse, httpStatus, durationMs, hasError })
+      .catch(e => console.warn('[XRS] Log não salvo:', e.message));
 
     return parsedData;
 

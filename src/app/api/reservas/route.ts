@@ -28,9 +28,27 @@ export async function POST(request: Request) {
       // ResNumber só é gerado agora se for Balcão ou CC. Se for PIX, será gerado depois pelo polling.
       let resNumber: string | null = paymentData.method !== 'PIX' ? gerarLocalizador() : null;
 
-      const cieloConfig = await prisma.cieloConfig.findFirst();
+      let cieloConfig: any = null;
+      try {
+        cieloConfig = await prisma.cieloConfig.findFirst();
+      } catch (dbErr: any) {
+        // DB unreachable — fallback to environment variables for Cielo credentials
+        console.warn('[reservas] DB indisponível, usando credenciais do .env como fallback:', dbErr.message);
+        const envMerchantId = process.env.CIELO_MERCHANT_ID;
+        const envMerchantKey = process.env.CIELO_MERCHANT_KEY;
+        const envSandbox = process.env.CIELO_SANDBOX !== 'false';
+        if ((paymentData.method === 'PIX' || paymentData.method === 'CREDIT') && envMerchantId && envMerchantKey) {
+          cieloConfig = { merchantId: envMerchantId, merchantKey: envMerchantKey, isSandbox: envSandbox };
+        } else if (paymentData.method === 'PIX' || paymentData.method === 'CREDIT') {
+          return NextResponse.json({
+            error: `Banco de dados indisponível e credenciais Cielo não encontradas no ambiente. Verifique se o projeto Supabase está ativo e tente novamente. (${dbErr.message})`
+          }, { status: 503 });
+        }
+        // For BALCÃO, continue without DB config (will generate local ID)
+      }
+
       if ((paymentData.method === 'PIX' || paymentData.method === 'CREDIT') && (!cieloConfig || !cieloConfig.merchantId || !cieloConfig.merchantKey)) {
-         return NextResponse.json({ error: 'Chaves da Cielo não configuradas no Admin. Configure-as antes de testar pagamentos online.' }, { status: 400 });
+         return NextResponse.json({ error: 'Chaves da Cielo não configuradas no Admin. Configure-as em /painel/config antes de testar pagamentos online.' }, { status: 400 });
       }
 
       // 1. Iniciar transação CIELO baseada no paymentData.method
@@ -45,6 +63,7 @@ export async function POST(request: Request) {
          "MerchantId": cieloConfig?.merchantId || '',
          "MerchantKey": cieloConfig?.merchantKey || ''
       };
+
 
       if (paymentData.method === 'PIX') {
          // Cielo PIX Real
@@ -68,13 +87,17 @@ export async function POST(request: Request) {
              throw new Error("Sistema Cielo Indisponível ou Resposta Inesperada: HTTP " + resCielo.status + " Corpo: " + resCieloText);
          }
          
-         await prisma.logCielo.create({
-             data: {
-                 endpoint: "POST /1/sales/ (PIX)",
-                 payload: JSON.stringify({ amount: paymentData.amountInCents, type: 'Pix' }),
-                 response: JSON.stringify(cieloResponseJson)
-             }
-         });
+         try {
+           await prisma.logCielo.create({
+               data: {
+                   endpoint: "POST /1/sales/ (PIX)",
+                   payload: JSON.stringify({ amount: paymentData.amountInCents, type: 'Pix' }),
+                   response: JSON.stringify(cieloResponseJson)
+               }
+           });
+         } catch (logErr: any) {
+           console.warn('[reservas] Falha ao salvar log Cielo (PIX):', logErr.message);
+         }
 
          if (!resCielo.ok || !cieloResponseJson.Payment || !cieloResponseJson.Payment.QrCodeString) {
              throw new Error("Erro na Cielo ao gerar PIX: " + JSON.stringify(cieloResponseJson));
@@ -129,13 +152,17 @@ export async function POST(request: Request) {
              throw new Error("Sistema Cielo Indisponível ou Resposta Inesperada: HTTP " + resCielo.status + " Corpo: " + resCieloText);
          }
 
-         await prisma.logCielo.create({
-             data: {
-                 endpoint: "POST /1/sales/ (CreditCard)",
-                 payload: JSON.stringify({ amount: paymentData.amountInCents, type: 'CreditCard' }), // NO PAN/CVV logs here for security!
-                 response: JSON.stringify(cieloResponseJson)
-             }
-         });
+         try {
+           await prisma.logCielo.create({
+               data: {
+                   endpoint: "POST /1/sales/ (CreditCard)",
+                   payload: JSON.stringify({ amount: paymentData.amountInCents, type: 'CreditCard' }), // NO PAN/CVV logs here for security!
+                   response: JSON.stringify(cieloResponseJson)
+               }
+           });
+         } catch (logErr: any) {
+           console.warn('[reservas] Falha ao salvar log Cielo (CC):', logErr.message);
+         }
 
          if (!resCielo.ok || (cieloResponseJson.Payment.Status !== 1 && cieloResponseJson.Payment.Status !== 2)) {
              throw new Error("Pagamento Recusado pela Cielo: " + (cieloResponseJson.Payment?.ReturnMessage || JSON.stringify(cieloResponseJson)));
@@ -145,19 +172,34 @@ export async function POST(request: Request) {
       }
 
       // 2. Salva a reserva no banco de dados "LocalReservation"
-      const localRes = await prisma.localReservation.create({
-         data: {
-            resNumber: resNumber,
-            merchantOrderId,
-            status: paymentData.method === 'PIX' ? 'PENDING_PIX' : (paymentData.method === 'BALCAO' ? 'CONFIRMED_NON_PREPAID' : 'CONFIRMED_PREPAID'),
-            customerData: JSON.stringify({ ...customerData, booking: bookingData, paymentId: pixData?.paymentId, systemLogOrigem: logOrigem })
-         }
-      });
+      let finalResNumber = resNumber;
+      let finalMerchantOrderId = merchantOrderId;
+      try {
+        const localRes = await prisma.localReservation.create({
+           data: {
+              resNumber: resNumber,
+              merchantOrderId,
+              amountInCents: paymentData.amountInCents || 0,
+              status: paymentData.method === 'PIX' ? 'PENDING_PIX' : (paymentData.method === 'BALCAO' ? 'CONFIRMED_NON_PREPAID' : 'CONFIRMED_PREPAID'),
+              customerData: JSON.stringify({ ...customerData, booking: bookingData, paymentId: pixData?.paymentId, systemLogOrigem: logOrigem })
+           }
+        });
+        finalResNumber = localRes.resNumber;
+        finalMerchantOrderId = localRes.merchantOrderId;
+      } catch (dbSaveErr: any) {
+        // DB save failed — for BALCÃO, we still confirm with local ID
+        // PIX/CREDIT would already have been charged, so log and continue
+        console.error('DB save failed:', dbSaveErr.message);
+        if (paymentData.method !== 'BALCAO') {
+          throw new Error('Pagamento processado mas falha ao salvar reserva: ' + dbSaveErr.message);
+        }
+        // BALCÃO: use in-memory generated resNumber
+      }
 
       return NextResponse.json({
          success: true,
-         resNumber: localRes.resNumber,
-         merchantOrderId: localRes.merchantOrderId,
+         resNumber: finalResNumber,
+         merchantOrderId: finalMerchantOrderId,
          pixData,
          cieloLog: `${cieloLog} | ${logOrigem}`
       });

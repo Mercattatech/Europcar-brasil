@@ -98,6 +98,14 @@ export default function HeroSearchForm() {
   // Date Picker Custom Popover
   const [showDatePicker, setShowDatePicker] = useState(false);
 
+  // Data mínima: sandbox ativo a partir de hoje+10 dias (verificado 28/03/2026)
+  // Em produção com estações BR reais, pode usar +1
+  const minPickupDate = (() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 10);
+    return d.toISOString().split("T")[0];
+  })();
+
   // Fetch stations on type
   useEffect(() => {
     if (stationQuery.length > 2) {
@@ -110,7 +118,7 @@ export default function HeroSearchForm() {
           setStations(data.stations || []);
           setShowStationsList(true);
           if (data.stations && data.stations.length > 0) {
-             setHoveredStation(data.stations[0]);
+            setHoveredStation(data.stations[0]);
           }
         } catch (e) {
           console.error(e);
@@ -135,38 +143,44 @@ export default function HeroSearchForm() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const handleSearch = async (e: React.FormEvent) => {
+  const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
+
     if (!pickupLocation) {
-      return alert("Selecione um local válido da lista");
+      alert("Selecione um local de retirada válido da lista");
+      return;
     }
-    try {
-      const formatXrsDate = (d: string) => d.replace(/-/g, "");
-      const formatXrsTime = (t: string) => t.replace(":", "");
-
-      const payload = {
-        pickupStation: pickupLocation,
-        returnStation: sameReturnLocation
-          ? pickupLocation
-          : returnLocation || pickupLocation,
-        pickupDate: formatXrsDate(pickupDate),
-        pickupTime: formatXrsTime(pickupTime),
-        returnDate: formatXrsDate(returnDate),
-        returnTime: formatXrsTime(returnTime),
-      };
-
-      const res = await fetch("/api/europcar/getCarCategories", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      await res.json();
-      window.location.href = `/reservation/vehicles?pickup=${pickupLocation}&date=${formatXrsDate(pickupDate)}`;
-    } catch (err) {
-      console.error("Erro na busca XRS", err);
-      alert("Erro ao consultar veículos. Verifique o log.");
+    if (!pickupDate) {
+      alert("Selecione a data de retirada");
+      return;
     }
+    if (minPickupDate && pickupDate < minPickupDate) {
+      alert(`A data mínima de retirada é ${minPickupDate}. Por favor selecione uma data válida.`);
+      return;
+    }
+
+    const fmt = (d: string) => d.replace(/-/g, "");
+    const fmtTime = (t: string) => t.replace(":", "");
+
+    // Garantir returnDate >= pickupDate + 3 dias
+    let effectiveReturn = returnDate;
+    if (!effectiveReturn || effectiveReturn <= pickupDate) {
+      const d = new Date(pickupDate);
+      d.setDate(d.getDate() + 3);
+      effectiveReturn = d.toISOString().split("T")[0];
+    }
+
+    const params = new URLSearchParams({
+      pickup:      pickupLocation,
+      return:      sameReturnLocation ? pickupLocation : (returnLocation || pickupLocation),
+      date:        fmt(pickupDate),
+      returnDate:  fmt(effectiveReturn),
+      time:        fmtTime(pickupTime),
+      returnTime:  fmtTime(returnTime),
+    });
+    if (tarifNumber) params.set("contractID", tarifNumber);
+
+    window.location.href = `/reservation/vehicles?${params.toString()}`;
   };
 
   const selectedCountryEmoji =
@@ -253,67 +267,67 @@ export default function HeroSearchForm() {
                 <div className="absolute top-full left-0 w-full md:w-[760px] mt-2 bg-white flex shadow-2xl rounded-lg z-50 h-[380px] overflow-hidden border border-gray-200">
                   {/* List part */}
                   <div className="w-full md:w-[380px] flex flex-col border-r border-gray-200">
-                     <div className="bg-gray-50 font-bold text-[10px] text-gray-500 px-4 py-2 border-b border-gray-200 tracking-wider">
-                         EUROPCAR STATION
-                     </div>
-                     <div className="flex-1 overflow-y-auto">
-                        {stations.map((station) => (
-                          <div
-                            key={station.code}
-                            className={`px-4 py-4 cursor-pointer text-sm border-b border-gray-100 flex items-center gap-3 transition-colors ${hoveredStation?.code === station.code ? 'bg-gray-100' : 'hover:bg-gray-50 text-gray-700'}`}
-                            onMouseEnter={() => setHoveredStation(station)}
-                            onClick={() => {
-                              setPickupLocation(station.code);
-                              setStationQuery(`${station.name}`);
-                              setShowStationsList(false);
-                            }}
-                          >
-                            {station.type === 'airport' ? (
-                               <svg className="w-5 h-5 text-gray-500" fill="currentColor" viewBox="0 0 24 24"><path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/></svg>
-                            ) : (
-                               <svg className="w-5 h-5 text-gray-500" fill="currentColor" viewBox="0 0 24 24"><path d="M15 11V5l-3-3-3 3v2H3v14h18V11h-6zm-8 8H5v-2h2v2zm0-4H5v-2h2v2zm0-4H5V9h2v2zm6 8h-2v-2h2v2zm0-4h-2v-2h2v2zm0-4h-2V9h2v2zm0-4h-2V5h2v2zm6 12h-2v-2h2v2zm0-4h-2v-2h2v2z"/></svg>
-                            )}
-                            <span className="font-extrabold text-sm uppercase text-gray-900 leading-snug">
-                              {station.name}
-                            </span>
-                          </div>
-                        ))}
-                     </div>
+                    <div className="bg-gray-50 font-bold text-[10px] text-gray-500 px-4 py-2 border-b border-gray-200 tracking-wider">
+                      EUROPCAR STATION
+                    </div>
+                    <div className="flex-1 overflow-y-auto">
+                      {stations.map((station) => (
+                        <div
+                          key={station.code}
+                          className={`px-4 py-4 cursor-pointer text-sm border-b border-gray-100 flex items-center gap-3 transition-colors ${hoveredStation?.code === station.code ? 'bg-gray-100' : 'hover:bg-gray-50 text-gray-700'}`}
+                          onMouseEnter={() => setHoveredStation(station)}
+                          onClick={() => {
+                            setPickupLocation(station.code);
+                            setStationQuery(`${station.name}`);
+                            setShowStationsList(false);
+                          }}
+                        >
+                          {station.type === 'airport' ? (
+                            <svg className="w-5 h-5 text-gray-500" fill="currentColor" viewBox="0 0 24 24"><path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z" /></svg>
+                          ) : (
+                            <svg className="w-5 h-5 text-gray-500" fill="currentColor" viewBox="0 0 24 24"><path d="M15 11V5l-3-3-3 3v2H3v14h18V11h-6zm-8 8H5v-2h2v2zm0-4H5v-2h2v2zm0-4H5V9h2v2zm6 8h-2v-2h2v2zm0-4h-2v-2h2v2zm0-4h-2V9h2v2zm0-4h-2V5h2v2zm6 12h-2v-2h2v2zm0-4h-2v-2h2v2z" /></svg>
+                          )}
+                          <span className="font-extrabold text-sm uppercase text-gray-900 leading-snug">
+                            {station.name}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
 
                   {/* Details part */}
                   {hoveredStation && (
-                     <div className="hidden md:flex flex-col w-[380px] bg-[#f9f9f9] overflow-y-auto relative p-6">
-                        <h3 className="font-extrabold text-sm uppercase text-black max-w-[80%] leading-tight">
-                            {hoveredStation.name}
-                        </h3>
-                        <p className="text-[11px] font-medium text-gray-500 mt-1 whitespace-pre-wrap leading-tight">
-                            {hoveredStation.address}
-                        </p>
-                        
-                        <div className="mt-4 flex flex-col gap-2">
-                           {hoveredStation.features?.map((f: string, i: number) => (
-                              <div key={i} className="flex items-start gap-1">
-                                  <svg className="w-4 h-4 text-[#008d36] font-bold shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"></path></svg>
-                                  <span className="text-xs font-bold text-black">{f}</span>
-                              </div>
-                           ))}
-                        </div>
+                    <div className="hidden md:flex flex-col w-[380px] bg-[#f9f9f9] overflow-y-auto relative p-6">
+                      <h3 className="font-extrabold text-sm uppercase text-black max-w-[80%] leading-tight">
+                        {hoveredStation.name}
+                      </h3>
+                      <p className="text-[11px] font-medium text-gray-500 mt-1 whitespace-pre-wrap leading-tight">
+                        {hoveredStation.address}
+                      </p>
 
-                        {hoveredStation.hours?.length > 0 && (
-                           <div className="flex flex-col gap-2 mt-6">
-                              {hoveredStation.hours.map((h: any, i: number) => (
-                                 <div key={i} className="flex text-xs font-bold w-full">
-                                    <span className="w-12 text-black">{h.day}:</span>
-                                    <span className="text-gray-500 whitespace-pre-wrap">{h.hours}</span>
-                                 </div>
-                              ))}
-                           </div>
-                        )}
-                        
-                        {/* Fake map snippet bottom right corner */}
-                        <div className="absolute bottom-0 right-0 w-32 h-32 opacity-40 mix-blend-multiply pointer-events-none" style={{ backgroundImage: 'url(https://maps.googleapis.com/maps/api/staticmap?center=-23.4287,-46.4735&zoom=12&size=400x400&sensor=false)', backgroundSize: 'cover' }}></div>
-                     </div>
+                      <div className="mt-4 flex flex-col gap-2">
+                        {hoveredStation.features?.map((f: string, i: number) => (
+                          <div key={i} className="flex items-start gap-1">
+                            <svg className="w-4 h-4 text-[#008d36] font-bold shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"></path></svg>
+                            <span className="text-xs font-bold text-black">{f}</span>
+                          </div>
+                        ))}
+                      </div>
+
+                      {hoveredStation.hours?.length > 0 && (
+                        <div className="flex flex-col gap-2 mt-6">
+                          {hoveredStation.hours.map((h: any, i: number) => (
+                            <div key={i} className="flex text-xs font-bold w-full">
+                              <span className="w-12 text-black">{h.day}:</span>
+                              <span className="text-gray-500 whitespace-pre-wrap">{h.hours}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Fake map snippet bottom right corner */}
+                      <div className="absolute bottom-0 right-0 w-32 h-32 opacity-40 mix-blend-multiply pointer-events-none" style={{ backgroundImage: 'url(https://maps.googleapis.com/maps/api/staticmap?center=-23.4287,-46.4735&zoom=12&size=400x400&sensor=false)', backgroundSize: 'cover' }}></div>
+                    </div>
                   )}
                 </div>
               )}
@@ -331,6 +345,7 @@ export default function HeroSearchForm() {
                   type="date"
                   className="w-full py-3 bg-transparent outline-none text-sm font-bold text-gray-900 cursor-pointer"
                   value={pickupDate}
+                  min={minPickupDate}
                   onChange={(e) => setPickupDate(e.target.value)}
                   required
                 />
@@ -361,7 +376,7 @@ export default function HeroSearchForm() {
                   className="w-full py-3 bg-transparent outline-none text-sm font-bold text-gray-900 cursor-pointer"
                   value={returnDate}
                   onChange={(e) => setReturnDate(e.target.value)}
-                  min={pickupDate}
+                  min={pickupDate || minPickupDate}
                   required
                 />
               </div>

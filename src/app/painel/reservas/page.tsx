@@ -193,13 +193,20 @@ export default function PainelReservas() {
                                  <div className="text-xs text-gray-500">{parsed?.email || "—"}</div>
                                  <div className="text-[10px] text-gray-600">{parsed?.cpf} • {parsed?.telefone}</div>
                               </td>
-                              <td className="px-5 py-4">
-                                 <div className="font-bold text-white text-xs uppercase">{parsed?.booking?.car?.name || "—"}</div>
-                              </td>
-                              <td className="px-5 py-4">
-                                 <div className="font-bold text-green-400">R$ {((parsed?.booking?.totalDay || 0) * 22).toFixed(2)}</div>
-                                 <div className="text-[10px] text-gray-600">R$ {(parsed?.booking?.totalDay || 0).toFixed(2)}/dia</div>
-                              </td>
+                               <td className="px-5 py-4">
+                                  <div className="font-bold text-white text-xs uppercase">{parsed?.booking?.car?.carCategorySample || parsed?.booking?.car?.carCategoryName || "—"}</div>
+                                  <div className="text-[10px] text-gray-500">{parsed?.booking?.car?.carCategoryCode || ""}</div>
+                               </td>
+                               <td className="px-5 py-4">
+                                  <div className="font-bold text-green-400">
+                                    {res.amountInCents 
+                                      ? `R$ ${(res.amountInCents / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` 
+                                      : <span className="text-gray-600 text-xs">—</span>}
+                                  </div>
+                                  <div className="text-[10px] text-gray-600">
+                                    {parsed?.booking?.days ? `${parsed.booking.days} dias` : ''}
+                                  </div>
+                               </td>
                               <td className="px-5 py-4">
                                  {changingStatus === res.id ? (
                                     <div className="space-y-1">

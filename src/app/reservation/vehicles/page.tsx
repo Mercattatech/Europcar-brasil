@@ -1,78 +1,257 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useCallback, Suspense } from "react";
 import { useSession, signOut } from "next-auth/react";
+import { useSearchParams } from "next/navigation";
 import LoginModal from "@/components/auth/LoginModal";
 
-const mockCars = [
-  {
-    id: 1,
-    name: "FIAT ARGO 1.0",
-    category: "COMPACT",
-    image: "https://www.europcar.com/vehicles/images/223/cars/fiat/argo.png",
-    passengers: 5,
-    doors: 5,
-    suitcasesLg: 2,
-    transmission: "Manual",
-    type: "Carro",
-    ac: true,
-    co2: 19,
-    price: 81.98,
-    total: 1803.64,
-  },
-  {
-    id: 2,
-    name: "TOYOTA COROLLA 1.8",
-    category: "PREMIUM",
-    image:
-      "https://www.europcar.com/vehicles/images/223/cars/toyota/corolla.png",
-    passengers: 5,
-    doors: 4,
-    suitcasesLg: 4,
-    transmission: "Automática",
-    type: "Premium",
-    ac: true,
-    co2: 21,
-    price: 238.8,
-    total: 5253.55,
-  },
-  {
-    id: 3,
-    name: "FIAT MOBI 1.0",
-    category: "ECONOMY",
-    image: "https://www.europcar.com/vehicles/images/223/cars/fiat/mobi.png",
-    passengers: 5,
-    doors: 5,
-    suitcasesLg: 1,
-    transmission: "Manual",
-    type: "Carro",
-    ac: true,
-    co2: 19,
-    price: 74.67,
-    total: 1642.73,
-  },
-];
+function getVehicleType(car: any): string {
+  const code = car.carCategoryCode || "";
+  if (car.carType === "TR") return "Furgões e caminhões";
+  if (code.startsWith("U") || code.startsWith("L")) return "Premium";
+  return "Carro";
+}
 
-export default function VehiclesSelectionPage() {
+// Multi-source car image: official API URL → sample name → ACRISS code → placeholder
+function CarImage({ sample, code, alt, imageUrl }: { sample: string; code: string; alt: string; imageUrl?: string }) {
+  const sources = [
+    // 1. Official image from XRS API (carvisual link — HD 835x557)
+    imageUrl || null,
+    // 2. By brand/model name from carCategorySample
+    sample ? (() => {
+      const parts = sample.split(" ");
+      const brand = parts[0].toLowerCase().replace(/[^a-z0-9]/g, "");
+      const model = parts.slice(1, 3).join("-").toLowerCase().replace(/[^a-z0-9-]/g, "");
+      return `https://www.europcar.com/vehicles/images/223/cars/${brand}/${model}.png`;
+    })() : null,
+    // 3. By ACRISS category code
+    code ? `https://static.europcar.com/carvisuals/partners/835x557/${code}_IT.png` : null,
+    // 4. Generic placeholder
+    `https://placehold.co/400x200/f5f5f5/008d36?text=${encodeURIComponent(code || "CAR")}`,
+  ].filter(Boolean) as string[];
+
+  const [srcIdx, setSrcIdx] = useState(0);
+
+  return (
+    <img
+      src={sources[srcIdx]}
+      alt={alt}
+      onError={() => { if (srcIdx < sources.length - 1) setSrcIdx(i => i + 1); }}
+      className="object-contain w-full h-full mix-blend-multiply"
+    />
+  );
+}
+
+
+
+// ---- Inner component (needs useSearchParams inside Suspense) ----
+function VehiclesContent() {
   const { data: session, status } = useSession();
+  const searchParams = useSearchParams();
   const [showLoginModal, setShowLoginModal] = useState(false);
-  const [showEditModal, setShowEditModal] = useState(false);
   const [selectedCar, setSelectedCar] = useState<any>(null);
-  const [currentStep, setCurrentStep] = useState(2); // 1: Res, 2: Veiculo, 3: Protecoes, 4: Revisar
+  const [currentStep, setCurrentStep] = useState(2);
 
-  // Extras State for Step 3
+  // URL params
+  const pickupStation = searchParams.get("pickup") || "";
+  const returnStation = searchParams.get("return") || pickupStation;
+  const pickupDate = searchParams.get("date") || "";
+  const pickupTime = (searchParams.get("time") || "1000").replace(":", "");
+  const returnTime = (searchParams.get("returnTime") || "1000").replace(":", "");
+  const contractID = searchParams.get("contractID") || "";
+
+  // Auto-compute returnDate (+3 days) if not in URL
+  const returnDate = useMemo(() => {
+    const rd = searchParams.get("returnDate");
+    if (rd) return rd;
+    if (!pickupDate || pickupDate.length < 8) return "";
+    const y = parseInt(pickupDate.slice(0, 4));
+    const m = parseInt(pickupDate.slice(4, 6)) - 1;
+    const d = parseInt(pickupDate.slice(6, 8));
+    const dt = new Date(y, m, d + 3);
+    return `${dt.getFullYear()}${String(dt.getMonth() + 1).padStart(2, "0")}${String(dt.getDate()).padStart(2, "0")}`;
+  }, [searchParams, pickupDate]);
+
+  // contractID from sessionStorage
+  const [sessionContractID, setSessionContractID] = useState("");
+  useEffect(() => {
+    try { setSessionContractID(sessionStorage.getItem("europcar_contractID") || ""); } catch {}
+  }, []);
+  const effectiveContractID = contractID || sessionContractID;
+
+  // Station name display
+  const [stationName, setStationName] = useState(pickupStation);
+  useEffect(() => {
+    if (!pickupStation) return;
+    fetch(`/api/europcar/getStations?q=${pickupStation}`)
+      .then(r => r.json())
+      .then(d => {
+        const s = d.stations?.find((x: any) => x.code === pickupStation);
+        if (s) setStationName(s.name);
+      }).catch(() => {});
+  }, [pickupStation]);
+
+  // XRS cars state
+  const [cars, setCars] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  // Extras
   const [dbExtras, setDbExtras] = useState<any[]>([]);
   const [selectedExtrasMap, setSelectedExtrasMap] = useState<Record<string, number>>({});
   const [loadingExtras, setLoadingExtras] = useState(false);
 
+  // Filters
+  const [transmission, setTransmission] = useState("Ambos");
+  const [vehicleType, setVehicleType] = useState("Todos");
+  const [minSeats, setMinSeats] = useState(2);
+  const [sortBy, setSortBy] = useState("Recomendado");
+
+  const formatDate = (d: string) => d ? `${d.slice(6, 8)}/${d.slice(4, 6)}/${d.slice(0, 4)}` : "";
+
+  // ---- Fetch vehicles from XRS ----
+  const fetchCars = useCallback(async () => {
+    if (!pickupStation || !pickupDate) {
+      setError("Dados de pesquisa incompletos. Volte e tente novamente.");
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setError("");
+    console.log("[vehicles] Iniciando busca:", { pickupStation, returnStation, pickupDate, returnDate, pickupTime, returnTime });
+    try {
+      // Step 1: getCarCategories → get ACRISS codes
+      const catRes = await fetch("/api/europcar/getCarCategories", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pickupStation, returnStation: returnStation || pickupStation, pickupDate, returnDate, pickupTime, returnTime }),
+      });
+      const catData = await catRes.json();
+      console.log("[vehicles] getCarCategories response:", JSON.stringify(catData).substring(0, 500));
+
+      // Detect KO response from XRS
+      const catReturnCode =
+        catData?.message?.serviceResponse?.$?.returnCode ||
+        catData?.serviceResponse?.$?.returnCode;
+      if (catReturnCode === "KO") {
+        const errCode =
+          catData?.message?.serviceResponse?.$?.errorCode ||
+          catData?.serviceResponse?.$?.errorCode || "unknown";
+        console.error("[vehicles] XRS getCarCategories KO:", errCode);
+        setError(`Erro da API Europcar (${errCode}). O servidor sandbox pode estar temporariamente indisponível. Tente novamente em alguns minutos.`);
+        setLoading(false);
+        return;
+      }
+
+      // Also check for HTTP-level error from our route
+      if (catData?.error) {
+        console.error("[vehicles] API route error:", catData.error);
+        setError(`Erro interno: ${catData.error}`);
+        setLoading(false);
+        return;
+      }
+
+      const rawCatList =
+        catData?.message?.serviceResponse?.carCategoryList?.carCategory ||
+        catData?.serviceResponse?.carCategoryList?.carCategory || [];
+      const catList: any[] = Array.isArray(rawCatList) ? rawCatList : rawCatList ? [rawCatList] : [];
+
+      const acrissCodes = catList
+        .map((c: any) => (c.$ ? c.$.carCategoryCode : c.carCategoryCode))
+        .filter(Boolean);
+
+      console.log("[vehicles] ACRISS codes encontrados:", acrissCodes.length, acrissCodes.slice(0, 5));
+
+      if (acrissCodes.length === 0) {
+        setError("Nenhum veículo disponível para esta estação e período.");
+        setLoading(false);
+        return;
+      }
+
+      // Step 2: getMultipleRates → response is reservationRateList/reservationRate
+      const ratesRes = await fetch("/api/europcar/getMultipleRates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          pickupStation,
+          returnStation: returnStation || pickupStation,
+          pickupDate,
+          returnDate,
+          pickupTime,
+          returnTime,
+          acrissCodes,
+          contractID: effectiveContractID,
+        }),
+      });
+      const ratesData = await ratesRes.json();
+      console.log("[vehicles] getMultipleRates response keys:", ratesData?.results ? `${ratesData.results.length} chunks` : "no results");
+
+      const allRates: any[] = [];
+      const chunks = Array.isArray(ratesData.results) ? ratesData.results : [ratesData];
+
+      for (const chunk of chunks) {
+        // Check for KO in each chunk
+        const chunkRC =
+          chunk?.message?.serviceResponse?.$?.returnCode ||
+          chunk?.serviceResponse?.$?.returnCode;
+        if (chunkRC === "KO") {
+          console.warn("[vehicles] getMultipleRates chunk KO, skipping");
+          continue;
+        }
+
+        const rawList =
+          chunk?.message?.serviceResponse?.reservationRateList?.reservationRate ||
+          chunk?.serviceResponse?.reservationRateList?.reservationRate || [];
+        const rateArr: any[] = Array.isArray(rawList) ? rawList : rawList ? [rawList] : [];
+        for (const r of rateArr) {
+          const attrs = r.$ || r;
+          if (!attrs.carCategoryCode || !attrs.totalRateEstimate) continue;
+
+          // Extract official car image from <links><link id="carvisual" .../></links>
+          const linksRaw = r.links?.link || [];
+          const linksArr: any[] = Array.isArray(linksRaw) ? linksRaw : [linksRaw];
+          const carvisual = linksArr.find((l: any) => (l.$ || l).id === "carvisual");
+          const imageUrl: string = (carvisual?.$ || carvisual)?.value || "";
+
+          // Extract optional insurances (type="O", price > 0) from <insuranceList>
+          const rawIns = r.insuranceList?.insurance || [];
+          const insArr: any[] = Array.isArray(rawIns) ? rawIns : [rawIns];
+          const optionalInsurances = insArr
+            .map((ins: any) => ins.$ || ins)
+            .filter((ins: any) => ins.type === "O" && parseFloat(ins.price || "0") > 0);
+
+          allRates.push({ ...attrs, imageUrl, optionalInsurances });
+        }
+      }
+
+      console.log("[vehicles] Total rates parsed:", allRates.length);
+
+      if (allRates.length === 0) {
+        setError("Sem tarifas disponíveis para o período selecionado. Tente outras datas.");
+        setLoading(false);
+        return;
+      }
+
+      setCars(allRates);
+    } catch (e: any) {
+      console.error("[vehicles] Erro no fetchCars:", e);
+      setError("Erro ao buscar veículos: " + (e.message || "Tente novamente."));
+    } finally {
+      setLoading(false);
+    }
+  }, [pickupStation, returnStation, pickupDate, returnDate, pickupTime, returnTime, effectiveContractID]);
+
+
+  useEffect(() => { fetchCars(); }, [fetchCars]);
+
+  // Load extras when advancing to step 3
   useEffect(() => {
     if (currentStep === 3 && dbExtras.length === 0) {
       setLoadingExtras(true);
-      fetch('/api/admin/extras')
-        .then(res => res.json())
-        .then(data => setDbExtras(data.filter((e: any) => e.active)))
+      fetch("/api/admin/extras")
+        .then(r => r.json())
+        .then(d => setDbExtras(d.filter((e: any) => e.active)))
         .finally(() => setLoadingExtras(false));
     }
   }, [currentStep, dbExtras.length]);
@@ -81,55 +260,40 @@ export default function VehiclesSelectionPage() {
     setSelectedExtrasMap(prev => {
       const current = prev[id] || 0;
       const next = Math.max(0, current + delta);
-      if (next === 0) {
-         const { [id]: _, ...rest } = prev;
-         return rest;
-      }
+      if (next === 0) { const { [id]: _, ...rest } = prev; return rest; }
       return { ...prev, [id]: next };
     });
   };
 
   const selectedExtrasPricePerDay = useMemo(() => {
-     let sum = 0;
-     for (const [id, qty] of Object.entries(selectedExtrasMap)) {
-        const ext = dbExtras.find(e => e.id === id);
-        if (ext) sum += ext.pricePerDay * qty;
-     }
-     return sum;
+    let sum = 0;
+    for (const [id, qty] of Object.entries(selectedExtrasMap)) {
+      const ext = dbExtras.find((e: any) => e.id === id);
+      if (ext) sum += ext.pricePerDay * (qty as number);
+    }
+    return sum;
   }, [selectedExtrasMap, dbExtras]);
 
-  // Filters State
-  const [transmission, setTransmission] = useState("Ambos");
-  const [vehicleType, setVehicleType] = useState("Carro");
-  const [minSeats, setMinSeats] = useState(2);
-  const [sortBy, setSortBy] = useState("Recomendado");
-
-  // Filtered Cars
   const filteredCars = useMemo(() => {
-    let result = mockCars.filter((car) => {
-      // Filter Transmission
-      if (transmission !== "Ambos" && car.transmission !== transmission)
-        return false;
-
-      // Filter Type (simplified)
-      if (vehicleType === "Carro" && car.type === "Premium") return false; // Exclude Premium from regular Carro for this mock
-      if (vehicleType === "Premium" && car.type !== "Premium") return false;
-
-      // Filter Seats
-      if (car.passengers < minSeats) return false;
-
+    let result = cars.filter((car: any) => {
+      const auto = car.carCategoryAutomatic === "Y";
+      if (transmission === "Automática" && !auto) return false;
+      if (transmission === "Manual" && auto) return false;
+      if (vehicleType !== "Todos" && getVehicleType(car) !== vehicleType) return false;
+      const seats = parseInt(car.carCategorySeats || "2");
+      if (seats < minSeats) return false;
       return true;
     });
-
-    // Sort
-    if (sortBy === "Preço: Menor para maior") {
-      result.sort((a, b) => a.price - b.price);
-    } else if (sortBy === "Preço: Maior para menor") {
-      result.sort((a, b) => b.price - a.price);
-    } // "Recomendado" keeps default order
-
+    if (sortBy === "Preço: Menor para maior") result.sort((a: any, b: any) => parseFloat(a.totalRateEstimate) - parseFloat(b.totalRateEstimate));
+    else if (sortBy === "Preço: Maior para menor") result.sort((a: any, b: any) => parseFloat(b.totalRateEstimate) - parseFloat(a.totalRateEstimate));
     return result;
-  }, [transmission, vehicleType, minSeats, sortBy]);
+  }, [cars, transmission, vehicleType, minSeats, sortBy]);
+
+  const priceRange = useMemo(() => {
+    if (!filteredCars.length) return { min: 0, max: 0 };
+    const prices = filteredCars.map((c: any) => parseFloat(c.totalRateEstimate || 0));
+    return { min: Math.min(...prices), max: Math.max(...prices) };
+  }, [filteredCars]);
 
   const handleSelectCar = (car: any) => {
     setSelectedCar(car);
@@ -137,729 +301,336 @@ export default function VehiclesSelectionPage() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
+  const fmtPrice = (v: any) => parseFloat(String(v || 0)).toFixed(2).replace(".", ",");
+
+  // ---- RENDER ----
   return (
     <div className="min-h-screen bg-[#f7f7f7] font-sans">
-      {/* Edit Location Modal */}
-      {showEditModal && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black bg-opacity-70 p-4">
-          <div className="bg-white rounded-lg p-8 w-full max-w-lg shadow-2xl relative">
-            <button
-              onClick={() => setShowEditModal(false)}
-              className="absolute top-4 right-4 text-gray-500 hover:text-black"
-            >
-              <svg
-                className="w-6 h-6"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth="2"
-                  d="M6 18L18 6M6 6l12 12"
-                ></path>
-              </svg>
-            </button>
-            <h2 className="text-2xl font-black text-gray-900 mb-6">
-              Alterar Pesquisa
-            </h2>
-            <div className="mb-4">
-              <label className="block text-sm font-bold text-gray-700 mb-1">
-                Local de retirada
-              </label>
-              <input
-                type="text"
-                className="w-full border border-gray-300 rounded px-4 py-3 outline-none focus:border-[#008d36]"
-                defaultValue="GUARULHOS AIRPORT MEET AND GREET"
-              />
-            </div>
-            <div className="flex gap-4 mb-8">
-              <div className="flex-1">
-                <label className="block text-sm font-bold text-gray-700 mb-1">
-                  Data/Hora Retirada
-                </label>
-                <input
-                  type="datetime-local"
-                  className="w-full border border-gray-300 rounded px-4 py-3 outline-none focus:border-[#008d36]"
-                  defaultValue="2026-03-18T10:00"
-                />
-              </div>
-              <div className="flex-1">
-                <label className="block text-sm font-bold text-gray-700 mb-1">
-                  Data/Hora Devolução
-                </label>
-                <input
-                  type="datetime-local"
-                  className="w-full border border-gray-300 rounded px-4 py-3 outline-none focus:border-[#008d36]"
-                  defaultValue="2026-04-09T09:45"
-                />
-              </div>
-            </div>
-            <button
-              onClick={() => setShowEditModal(false)}
-              className="w-full bg-[#ffcc00] hover:bg-[#e6b800] text-gray-900 font-bold py-4 rounded transition-colors text-lg"
-            >
-              Atualizar Pesquisa
-            </button>
-          </div>
-        </div>
-      )}
+      {showLoginModal && <LoginModal onClose={() => setShowLoginModal(false)} />}
 
-      {/* Login Modal */}
-      {showLoginModal && (
-         <LoginModal onClose={() => setShowLoginModal(false)} />
-      )}
-
-      {/* Header Branco Simples */}
+      {/* Header */}
       <header className="bg-white border-b border-gray-200 sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 h-20 flex justify-between items-center">
           <Link href="/">
-            <div className="bg-[#008d36] px-4 py-2 flex items-center justify-center">
-               <img src="/logo.jpg" alt="Europcar" className="h-[30px] md:h-[40px] object-contain" />
-            </div>
+            <div className="bg-[#008d36] px-4 py-2"><img src="/logo.jpg" alt="Europcar" className="h-10 object-contain" /></div>
           </Link>
           <div className="flex items-center gap-6 text-sm font-bold text-gray-900">
-            {status === "loading" ? (
-               <span className="text-gray-400">Carregando...</span>
-            ) : session?.user ? (
-               <div className="flex items-center gap-4">
-                  <span className="text-[#008d36]">Olá, {session.user.name || session.user.email?.split('@')[0]}</span>
-                  <button onClick={() => signOut()} className="text-xs text-gray-500 hover:text-red-500 font-normal">Sair</button>
-               </div>
-            ) : (
-               <button onClick={() => setShowLoginModal(true)} className="flex items-center gap-2 hover:text-[#008d36]">
-                 <svg
-                   className="w-5 h-5"
-                   fill="none"
-                   stroke="currentColor"
-                   viewBox="0 0 24 24"
-                 >
-                   <path
-                     strokeLinecap="round"
-                     strokeLinejoin="round"
-                     strokeWidth="2"
-                     d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
-                   ></path>
-                 </svg>
-                 Fazer login
-               </button>
+            {session?.user ? (
+              <div className="flex items-center gap-4">
+                <span className="text-[#008d36]">Olá, {session.user.name || session.user.email?.split("@")[0]}</span>
+                <button onClick={() => signOut()} className="text-xs text-gray-500 hover:text-red-500 font-normal">Sair</button>
+              </div>
+            ) : status !== "loading" && (
+              <button onClick={() => setShowLoginModal(true)} className="hover:text-[#008d36]">Fazer login</button>
             )}
-            <button className="flex items-center gap-2 hover:text-[#008d36]">
-              <span className="text-xl">🇧🇷</span> BR
-            </button>
-            <a href="https://www.europcar.com/pt-br/contact-us" target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 hover:text-[#008d36]">
-              <svg
-                className="w-5 h-5"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth="2"
-                  d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                ></path>
-              </svg>
-              Ajuda
-            </a>
+            <span>🇧🇷 BR</span>
           </div>
         </div>
       </header>
 
-      {/* Stepper Nav */}
-      <div className="bg-white border-b border-gray-200 py-6">
+      {/* Stepper */}
+      <div className="bg-white border-b border-gray-200 py-4">
         <div className="max-w-7xl mx-auto px-4 flex gap-4">
           {/* Step 1 */}
-          <div className="flex-1 bg-white border border-gray-200 rounded p-4 flex flex-col justify-between">
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-2">
-                <span className="bg-[#008d36] text-white font-bold text-xs w-5 h-5 flex items-center justify-center rounded-sm">
-                  1
-                </span>
-                <span className="text-[11px] font-bold text-gray-500 uppercase">
-                  LOCAL DO ALUGUEL
-                </span>
-              </div>
-              <button onClick={() => setShowEditModal(true)}>
-                <svg
-                  className="w-4 h-4 text-[#008d36]"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth="2"
-                    d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
-                  ></path>
-                </svg>
-              </button>
-            </div>
-            <div className="flex justify-between">
-              <div>
-                <span className="text-[10px] font-bold text-gray-900 block uppercase">
-                  Retirada
-                </span>
-                <span className="text-xs font-bold text-gray-900 block truncate max-w-[120px]">
-                  GUARULHOS AIRPORT...
-                </span>
-                <span className="text-xs text-gray-500">2026-03-18 10:00</span>
-              </div>
-              <div>
-                <span className="text-[10px] font-bold text-gray-900 block uppercase">
-                  Devolução
-                </span>
-                <span className="text-xs font-bold text-gray-900 block truncate max-w-[120px]">
-                  GUARULHOS AIRPORT...
-                </span>
-                <span className="text-xs text-gray-500">2026-04-09 09:45</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Step 2 */}
-          <div
-            className={`flex-1 bg-white border-2 ${currentStep === 2 ? "border-[#008d36]" : "border-gray-200"} rounded p-4 relative`}
-          >
-            <div className="absolute -top-3 left-4 bg-white px-2 flex items-center gap-2">
-              <span
-                className={`${currentStep >= 2 ? "bg-[#008d36] text-white" : "bg-gray-200 text-gray-500"} font-bold text-xs w-5 h-5 flex items-center justify-center rounded-sm`}
-              >
-                2
-              </span>
-              <span
-                className={`text-[11px] font-bold ${currentStep >= 2 ? "text-[#008d36]" : "text-gray-500"} uppercase`}
-              >
-                VEÍCULO
-              </span>
-            </div>
-            {selectedCar ? (
-              <div className="mt-2 text-xs font-bold text-gray-900 flex items-center gap-2">
-                <svg
-                  className="w-4 h-4 text-[#008d36]"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth="3"
-                    d="M5 13l4 4L19 7"
-                  ></path>
-                </svg>
-                {selectedCar.name} selecionado
-              </div>
-            ) : (
-              <p className="text-[13px] text-gray-500 mt-2">
-                Você ainda não selecionou um veículo.
-              </p>
-            )}
-          </div>
-
-          {/* Step 3 */}
-          <div
-            className={`flex-1 bg-white border-2 ${currentStep === 3 ? "border-[#008d36]" : "border-gray-200"} rounded p-4 relative`}
-          >
-            {currentStep === 3 && (
-              <div className="absolute -top-3 left-4 bg-white px-2 flex items-center gap-2">
-                <span className="bg-[#008d36] text-white font-bold text-xs w-5 h-5 flex items-center justify-center rounded-sm">
-                  3
-                </span>
-                <span className="text-[11px] font-bold text-[#008d36] uppercase">
-                  PROTEÇÃO, EXTRAS
-                </span>
-              </div>
-            )}
-            {currentStep !== 3 && (
-              <div className="flex items-center gap-2 mb-2">
-                <span className="bg-gray-200 text-gray-500 font-bold text-xs w-5 h-5 flex items-center justify-center rounded-sm">
-                  3
-                </span>
-                <span className="text-[11px] font-bold text-gray-500 uppercase">
-                  PROTEÇÃO, EXTRAS
-                </span>
-              </div>
-            )}
-            <p className="text-[13px] text-gray-500 mt-2">
-              {currentStep === 3
-                ? "Selecione a proteção e adicione extras opcionais."
-                : "Você poderá escolher proteção e extras depois de selecionar um veículo."}
-            </p>
-          </div>
-
-          {/* Step 4 */}
           <div className="flex-1 bg-white border border-gray-200 rounded p-4">
             <div className="flex items-center gap-2 mb-2">
-              <span className="bg-gray-200 text-gray-500 font-bold text-xs w-5 h-5 flex items-center justify-center rounded-sm">
-                4
-              </span>
-              <span className="text-[11px] font-bold text-gray-500 uppercase">
-                REVISAR
-              </span>
+              <span className="bg-[#008d36] text-white font-bold text-xs w-5 h-5 flex items-center justify-center rounded-sm">1</span>
+              <span className="text-[11px] font-bold text-gray-500 uppercase">LOCAL DO ALUGUEL</span>
+            </div>
+            <div className="flex justify-between text-xs">
+              <div>
+                <div className="font-bold text-gray-900 uppercase text-[10px]">Retirada</div>
+                <div className="font-bold truncate max-w-[130px]">{stationName || pickupStation}</div>
+                <div className="text-gray-500">{formatDate(pickupDate)}</div>
+              </div>
+              <div>
+                <div className="font-bold text-gray-900 uppercase text-[10px]">Devolução</div>
+                <div className="font-bold truncate max-w-[130px]">{stationName || (returnStation || pickupStation)}</div>
+                <div className="text-gray-500">{formatDate(returnDate)}</div>
+              </div>
+            </div>
+          </div>
+          {/* Step 2 */}
+          <div className={`flex-1 bg-white border-2 ${currentStep === 2 ? "border-[#008d36]" : "border-gray-200"} rounded p-4 relative`}>
+            <div className="absolute -top-3 left-4 bg-white px-2 flex items-center gap-2">
+              <span className="bg-[#008d36] text-white font-bold text-xs w-5 h-5 flex items-center justify-center rounded-sm">2</span>
+              <span className="text-[11px] font-bold text-[#008d36] uppercase">VEÍCULO</span>
+            </div>
+            <p className="text-[13px] text-gray-500 mt-2">
+              {selectedCar ? `${selectedCar.carCategoryName || selectedCar.carCategoryCode} ✓` : "Selecione um veículo abaixo."}
+            </p>
+          </div>
+          {/* Step 3 */}
+          <div className={`flex-1 bg-white border-2 ${currentStep === 3 ? "border-[#008d36]" : "border-gray-200"} rounded p-4 relative`}>
+            <div className="absolute -top-3 left-4 bg-white px-2 flex items-center gap-2">
+              <span className={`${currentStep === 3 ? "bg-[#008d36] text-white" : "bg-gray-200 text-gray-500"} font-bold text-xs w-5 h-5 flex items-center justify-center rounded-sm`}>3</span>
+              <span className={`text-[11px] font-bold ${currentStep === 3 ? "text-[#008d36]" : "text-gray-400"} uppercase`}>PROTEÇÃO, EXTRAS</span>
+            </div>
+            <p className="text-[13px] text-gray-500 mt-2">{currentStep === 3 ? "Escolha extras opcionais." : "Disponível após selecionar veículo."}</p>
+          </div>
+          {/* Step 4 */}
+          <div className="flex-1 bg-white border border-gray-200 rounded p-4">
+            <div className="flex items-center gap-2">
+              <span className="bg-gray-200 text-gray-500 font-bold text-xs w-5 h-5 flex items-center justify-center rounded-sm">4</span>
+              <span className="text-[11px] font-bold text-gray-400 uppercase">REVISAR</span>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Main Content */}
+      {/* Main */}
       <div className="max-w-7xl mx-auto px-4 py-8 flex gap-8 items-start">
-        {/* Sidebar Filters */}
-        <div className="w-[280px] shrink-0 sticky top-4">
+        {/* Filters sidebar */}
+        <div className="w-[260px] shrink-0 sticky top-4">
           <div className="bg-white rounded border border-gray-200 p-6">
-            <div className="flex justify-between items-center mb-6 border-b border-gray-100 pb-4">
+            <div className="flex justify-between items-center mb-4 border-b border-gray-100 pb-3">
               <h3 className="font-bold text-gray-900">Filtros</h3>
-              <button
-                onClick={() => {
-                  setTransmission("Ambos");
-                  setVehicleType("Carro");
-                  setMinSeats(2);
-                }}
-                className="text-[#008d36] text-xs font-bold hover:underline"
-              >
-                Redefinir tudo
-              </button>
+              <button onClick={() => { setTransmission("Ambos"); setVehicleType("Todos"); setMinSeats(2); }} className="text-[#008d36] text-xs font-bold hover:underline">Redefinir</button>
             </div>
-
-            {/* Transmissão */}
-            <div className="mb-8">
-              <h4 className="font-bold text-sm text-gray-900 mb-4">
-                Transmissão
-              </h4>
-              <div className="flex flex-col gap-3">
-                <label className="flex items-center gap-3 text-sm text-gray-600 cursor-pointer">
-                  <input
-                    type="radio"
-                    name="transmissao"
-                    checked={transmission === "Automática"}
-                    onChange={() => setTransmission("Automática")}
-                    className="w-4 h-4 text-[#008d36] focus:ring-[#008d36]"
-                  />{" "}
-                  Automática
+            <div className="mb-5">
+              <h4 className="font-bold text-sm text-gray-900 mb-2">Transmissão</h4>
+              {["Ambos", "Automática", "Manual"].map(t => (
+                <label key={t} className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer mb-1.5">
+                  <input type="radio" name="trans" checked={transmission === t} onChange={() => setTransmission(t)} className="accent-[#008d36]" /> {t}
                 </label>
-                <label className="flex items-center gap-3 text-sm text-gray-600 cursor-pointer">
-                  <input
-                    type="radio"
-                    name="transmissao"
-                    checked={transmission === "Manual"}
-                    onChange={() => setTransmission("Manual")}
-                    className="w-4 h-4 text-[#008d36] focus:ring-[#008d36]"
-                  />{" "}
-                  Manual
-                </label>
-                <label className="flex items-center gap-3 text-sm text-gray-900 font-bold cursor-pointer">
-                  <input
-                    type="radio"
-                    name="transmissao"
-                    checked={transmission === "Ambos"}
-                    onChange={() => setTransmission("Ambos")}
-                    className="w-4 h-4 accent-[#008d36] text-[#008d36] focus:ring-[#008d36]"
-                  />{" "}
-                  Ambos
-                </label>
-              </div>
+              ))}
             </div>
-
-            {/* Tipo de veículo */}
-            <div className="mb-8 border-t border-gray-100 pt-6">
-              <h4 className="font-bold text-sm text-gray-900 mb-4">
-                Tipo de veículo
-              </h4>
-              <div className="flex flex-col gap-3">
-                <label
-                  className={`flex items-center gap-3 text-sm ${vehicleType === "Carro" ? "text-gray-900 font-bold" : "text-gray-600"} cursor-pointer`}
-                >
-                  <input
-                    type="radio"
-                    name="tipo"
-                    checked={vehicleType === "Carro"}
-                    onChange={() => setVehicleType("Carro")}
-                    className="w-4 h-4 accent-[#008d36] text-[#008d36]"
-                  />{" "}
-                  Carro
+            <div className="mb-5 border-t border-gray-100 pt-4">
+              <h4 className="font-bold text-sm text-gray-900 mb-2">Tipo de veículo</h4>
+              {["Todos", "Carro", "Furgões e caminhões", "Premium"].map(v => (
+                <label key={v} className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer mb-1.5">
+                  <input type="radio" name="tipo" checked={vehicleType === v} onChange={() => setVehicleType(v)} className="accent-[#008d36]" /> {v}
                 </label>
-                <label
-                  className={`flex items-center gap-3 text-sm ${vehicleType === "Furgões e caminhões" ? "text-gray-900 font-bold" : "text-gray-600"} cursor-pointer`}
-                >
-                  <input
-                    type="radio"
-                    name="tipo"
-                    checked={vehicleType === "Furgões e caminhões"}
-                    onChange={() => setVehicleType("Furgões e caminhões")}
-                    className="w-4 h-4 accent-[#008d36] text-[#008d36]"
-                  />{" "}
-                  Furgões e caminhões
-                </label>
-                <label
-                  className={`flex items-center gap-3 text-sm ${vehicleType === "Premium" ? "text-gray-900 font-bold" : "text-gray-600"} cursor-pointer`}
-                >
-                  <input
-                    type="radio"
-                    name="tipo"
-                    checked={vehicleType === "Premium"}
-                    onChange={() => setVehicleType("Premium")}
-                    className="w-4 h-4 accent-[#008d36] text-[#008d36]"
-                  />{" "}
-                  Premium
-                </label>
-              </div>
+              ))}
             </div>
-
-            {/* Assentos */}
-            <div className="mb-8 border-t border-gray-100 pt-6">
-              <h4 className="font-bold text-sm text-gray-900 mb-4">Assentos</h4>
-              <div className="flex justify-between text-xs font-bold text-gray-900 mb-2">
-                <span>2+</span>
-                <span>4+</span>
-                <span>5+</span>
-                <span>7+</span>
-              </div>
-              <input
-                type="range"
-                min="2"
-                max="7"
-                value={minSeats}
-                onChange={(e) => setMinSeats(Number(e.target.value))}
-                className="w-full h-1 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-[#008d36]"
-              />
+            <div className="border-t border-gray-100 pt-4">
+              <h4 className="font-bold text-sm text-gray-900 mb-2">Assentos mín.</h4>
+              <div className="flex justify-between text-xs font-bold text-gray-600 mb-1">{[2, 4, 5, 7].map(n => <span key={n}>{n}+</span>)}</div>
+              <input type="range" min="2" max="7" value={minSeats} onChange={e => setMinSeats(Number(e.target.value))} className="w-full accent-[#008d36]" />
             </div>
-
-            {/* Faixa de preço */}
-            <div className="border-t border-gray-100 pt-6">
-              <h4 className="font-bold text-sm text-gray-900 mb-4">
-                Faixa de preço
-              </h4>
-              <div className="flex gap-4">
-                <div className="flex-1">
-                  <label className="text-[10px] text-gray-500 font-bold mb-1 block">
-                    preço mínimo
-                  </label>
-                  <div className="border border-gray-300 rounded p-2 text-sm font-bold text-gray-900">
-                    R$ 1642
-                  </div>
-                </div>
-                <div className="flex-1">
-                  <label className="text-[10px] text-gray-500 font-bold mb-1 block">
-                    preço máximo
-                  </label>
-                  <div className="border border-gray-300 rounded p-2 text-sm font-bold text-gray-900">
-                    R$ 21194
-                  </div>
+            {priceRange.max > 0 && (
+              <div className="border-t border-gray-100 pt-4 mt-4">
+                <h4 className="font-bold text-sm text-gray-900 mb-2">Preços ({filteredCars[0]?.currency || "EUR"})</h4>
+                <div className="flex gap-3">
+                  <div className="flex-1 text-center border border-gray-200 rounded p-2 text-sm font-bold">{fmtPrice(priceRange.min)}</div>
+                  <span className="self-center text-gray-400">—</span>
+                  <div className="flex-1 text-center border border-gray-200 rounded p-2 text-sm font-bold">{fmtPrice(priceRange.max)}</div>
                 </div>
               </div>
-            </div>
+            )}
           </div>
         </div>
 
-        {/* Vehicles List */}
+        {/* Content area */}
         <div className="flex-1">
           {currentStep === 2 ? (
             <>
-              <div className="flex justify-end items-center mb-6">
-                <label className="text-sm font-bold text-gray-900 mr-3">
-                  Classificar por:
-                </label>
-                <select
-                  className="border border-gray-300 rounded bg-white px-3 py-2 text-sm font-bold text-gray-700 outline-none w-48"
-                  value={sortBy}
-                  onChange={(e) => setSortBy(e.target.value)}
-                >
-                  <option value="Recomendado">Recomendado</option>
-                  <option value="Preço: Menor para maior">
-                    Preço: Menor para maior
-                  </option>
-                  <option value="Preço: Maior para menor">
-                    Preço: Maior para menor
-                  </option>
+              <div className="flex justify-end items-center mb-5">
+                <label className="text-sm font-bold text-gray-900 mr-3">Classificar por:</label>
+                <select className="border border-gray-300 rounded bg-white px-3 py-2 text-sm font-bold text-gray-700 outline-none w-52" value={sortBy} onChange={e => setSortBy(e.target.value)}>
+                  <option>Recomendado</option>
+                  <option>Preço: Menor para maior</option>
+                  <option>Preço: Maior para menor</option>
                 </select>
               </div>
 
-              <div className="bg-white border border-gray-200 rounded-lg p-4 mb-6 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-6 h-6 rounded-full bg-[#1b75bb] flex items-center justify-center text-white font-bold text-sm italic">
-                    i
-                  </div>
-                  <span className="text-sm font-bold text-gray-900">
-                    Local de aluguel Meet & Greet
-                  </span>
+              {/* Loading */}
+              {loading && (
+                <div className="bg-white rounded-lg border border-gray-200 p-16 text-center">
+                  <div className="w-10 h-10 border-4 border-[#008d36] border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                  <p className="font-bold text-gray-600">Buscando veículos disponíveis...</p>
+                  <p className="text-sm text-gray-400 mt-1">Consultando API Europcar XRS</p>
                 </div>
-                <svg
-                  className="w-5 h-5 text-gray-500"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth="2"
-                    d="M19 9l-7 7-7-7"
-                  ></path>
-                </svg>
-              </div>
+              )}
 
-              {/* Cars Grid */}
-              <div className="flex flex-col gap-6">
-                {filteredCars.length === 0 && (
-                  <div className="bg-white p-8 text-center rounded-lg border border-gray-200 text-gray-500 font-medium">
-                    Nenhum veículo encontrado com estes filtros. Tente mudar ou
-                    redefinir.
-                  </div>
-                )}
-                {filteredCars.map((car) => (
-                  <div
-                    key={car.id}
-                    className={`bg-white rounded-lg border p-6 flex items-center gap-8 relative transition-shadow ${selectedCar?.id === car.id ? "border-[#008d36] shadow-lg" : "border-gray-200 hover:shadow-lg"}`}
-                  >
-                    <div className="w-[300px] shrink-0">
-                      <div className="h-[180px] bg-white border border-gray-100 rounded mb-4 overflow-hidden relative flex items-center justify-center p-4">
-                        <img
-                          src={car.image}
-                          alt={car.name}
-                          onError={(e) => { e.currentTarget.src = "https://placehold.co/400x200/efefef/008d36?text=Foto+Indisponível"; e.currentTarget.className = "object-contain w-full h-full rounded" }}
-                          className="object-contain w-full h-full mix-blend-multiply"
-                        />
-                      </div>
-                    </div>
+              {/* Error */}
+              {!loading && error && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-8 text-center">
+                  <div className="text-4xl mb-3">⚠️</div>
+                  <p className="font-bold text-red-700 text-lg mb-1">Não foi possível carregar os veículos</p>
+                  <p className="text-red-600 text-sm mb-4">{error}</p>
+                  <button onClick={fetchCars} className="bg-[#008d36] text-white px-6 py-2 rounded font-bold text-sm hover:bg-[#007530]">Tentar novamente</button>
+                </div>
+              )}
 
-                    <div className="flex-1 flex flex-col justify-between self-stretch py-2">
-                      <div>
-                        <h2 className="text-xl font-black text-gray-900 uppercase leading-none">
-                          {car.name}
-                        </h2>
-                        <div className="inline-flex items-center mt-2 border border-gray-200 rounded-full px-3 py-1 bg-gray-50">
-                          <span className="text-[10px] font-bold text-gray-600 mr-2 uppercase">
-                            OU SIMILAR {car.category}
-                          </span>
-                          <span className="w-3.5 h-3.5 bg-[#bfbfbf] text-white rounded-full flex items-center justify-center text-[10px] font-bold">
-                            i
-                          </span>
+              {/* Cars */}
+              {!loading && !error && (
+                <div className="flex flex-col gap-5">
+                  {filteredCars.length === 0 && (
+                    <div className="bg-white p-8 text-center rounded-lg border border-gray-200 text-gray-500">Nenhum veículo com estes filtros. Tente redefinir.</div>
+                  )}
+                  {filteredCars.map((car: any, idx: number) => {
+                    const code = car.carCategoryCode;
+                    const name = car.carCategoryName || code;
+                    const sample = car.carCategorySample || "";
+                    const currency = car.currency || "EUR";
+                    const totalPrice = parseFloat(car.totalRateEstimate || 0);
+                    const basePrice = parseFloat(car.basePrice || 0);
+                    const isSelected = selectedCar?.carCategoryCode === code && selectedCar?.rateId === car.rateId;
+
+                    return (
+                      <div key={`${code}-${idx}`} className={`bg-white rounded-lg border p-5 flex items-center gap-6 transition-shadow ${isSelected ? "border-[#008d36] shadow-lg" : "border-gray-200 hover:shadow-md"}`}>
+                        {/* Image */}
+                        <div className="w-[240px] shrink-0">
+                          <div className="h-[150px] bg-white border border-gray-100 rounded flex items-center justify-center p-3">
+                            <CarImage sample={sample} code={code} alt={sample || name} imageUrl={car.imageUrl} />
+                          </div>
+                          {sample && <p className="text-[10px] text-center text-gray-400 mt-1">{sample} ou similar</p>}
                         </div>
 
-                        <div className="flex items-center gap-4 mt-6 text-sm text-gray-600 font-bold">
-                          <div className="flex items-center gap-1">
-                            <span title="Passageiros">🧑‍🤝‍🧑 {car.passengers}</span>
+                        {/* Info */}
+                        <div className="flex-1">
+                          <h2 className="text-lg font-black text-gray-900 uppercase">{name}</h2>
+                          <span className="text-[10px] bg-gray-100 text-gray-600 font-bold px-2 py-0.5 rounded-full">{code}</span>
+
+                          <div className="flex items-center gap-4 mt-3 text-sm font-bold text-gray-600 flex-wrap">
+                            <span>🧑‍🤝‍🧑 {car.carCategorySeats || "?"}</span>
+                            <span>🚪 {car.carCategoryDoors || "?"}</span>
+                            {car.carCategoryBaggageQuantity && <span>🧳 {car.carCategoryBaggageQuantity}</span>}
+                            <span>⚙️ {car.carCategoryAutomatic === "Y" ? "Auto" : "Manual"}</span>
+                            {car.carCategoryAirCond === "Y" && <span>❄️ A/C</span>}
+                            {car.fuelTypeCode && <span>⛽ {car.fuelTypeCode}</span>}
                           </div>
-                          <div className="flex items-center gap-1">
-                            <span title="Portas">🚪 {car.doors}</span>
+
+                          <div className="flex items-center gap-2 mt-3 text-sm font-bold text-[#008d36]">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>
+                            {car.includedKm === "UNLIMITED" ? "Quilometragem ilimitada" : `${car.includedKm} km incluídos`}
                           </div>
-                          <div className="flex items-center gap-1">
-                            <span title="Malas">🧳 {car.suitcasesLg}</span>
+                        </div>
+
+                        {/* Price + CTA */}
+                        <div className="w-[175px] shrink-0 flex flex-col items-end border-l border-gray-100 pl-5">
+                          <span className="text-[10px] uppercase font-bold text-gray-400 mb-1">TOTAL DO PERÍODO</span>
+                          <div className="flex items-baseline gap-1 mb-1">
+                            <span className="text-2xl font-black text-gray-900">{currency} {fmtPrice(totalPrice)}</span>
                           </div>
-                          <div className="flex items-center gap-1">
-                            <span title="Transmissão">
-                              {car.transmission === "Manual" ? "⚙️ M" : "⚙️ A"}
-                            </span>
-                          </div>
-                          {car.ac && (
-                            <div className="flex items-center gap-1">
-                              <span title="Ar condicionado">❄️ A/C</span>
-                            </div>
+                          <span className="text-xs text-gray-400 mb-3">Base: {currency} {fmtPrice(basePrice)}</span>
+                          {car.bookingCurrencyOfTotalRateEstimate && car.bookingCurrencyOfTotalRateEstimate !== currency && (
+                            <span className="text-xs text-gray-500 mb-2">≈ {car.bookingCurrencyOfTotalRateEstimate} {fmtPrice(car.totalRateEstimateInBookingCurrency)}</span>
                           )}
-                          <div className="flex items-center gap-1">
-                            <span title="Emissão CO2">🍃 {car.co2}</span>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-2 mt-4 text-[#008d36] text-sm font-bold">
-                          <svg
-                            className="w-4 h-4"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
+                          <button
+                            onClick={() => handleSelectCar(car)}
+                            className={`w-full font-bold py-3 rounded text-sm transition-colors ${isSelected ? "bg-[#008d36] text-white" : "bg-[#ffcc00] hover:bg-[#e6b800] text-gray-900"}`}
                           >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth="3"
-                              d="M5 13l4 4L19 7"
-                            ></path>
-                          </svg>
-                          Quilometragem ilimitada
+                            {isSelected ? "Selecionado ✓" : "Selecionar"}
+                          </button>
                         </div>
                       </div>
-
-                      <div className="mt-4">
-                        <button className="text-[#008d36] text-xs font-bold flex items-center gap-1 hover:underline">
-                          Mais detalhes{" "}
-                          <svg
-                            className="w-4 h-4"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth="2"
-                              d="M19 9l-7 7-7-7"
-                            ></path>
-                          </svg>
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="w-[180px] shrink-0 flex flex-col items-end self-stretch justify-center border-l border-gray-100 pl-6">
-                      <span className="text-[10px] uppercase font-bold text-gray-500 mb-1">
-                        PAGAR NO BALCÃO
-                      </span>
-                      <div className="flex items-baseline gap-1">
-                        <span className="text-2xl font-black text-gray-900">
-                          R$ {car.price.toFixed(2).replace(".", ",")}
-                        </span>
-                        <span className="text-sm font-bold text-gray-900">
-                          / dia
-                        </span>
-                      </div>
-                      <span className="text-xs text-gray-500 font-medium mb-4">
-                        TOTAL R$ {car.total.toFixed(2).replace(".", ",")}
-                      </span>
-
-                      <button
-                        onClick={() => handleSelectCar(car)}
-                        className={`w-full ${selectedCar?.id === car.id ? "bg-[#008d36] text-white border-2 border-[#008d36]" : "bg-[#ffcc00] hover:bg-[#e6b800] text-gray-900 border-2 border-transparent"} font-bold py-3 rounded text-sm transition-colors shadow-sm`}
-                      >
-                        {selectedCar?.id === car.id
-                          ? "Selecionado ✓"
-                          : "Selecionar"}
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
+                    );
+                  })}
+                </div>
+              )}
             </>
           ) : (
-            <div className="bg-[#f7f7f7] rounded border border-gray-200 p-8 shadow-sm relative">
-              <button
-                onClick={() => setCurrentStep(2)}
-                className="absolute top-8 right-8 text-[#008d36] font-bold px-4 py-2 hover:underline text-sm"
-              >
-                ← Voltar
-              </button>
-              
-              <h2 className="text-2xl font-black text-gray-900 mb-8 pb-4">
-                Escolha sua proteção e seus extras
-              </h2>
+            /* Step 3 */
+            <div className="bg-white rounded border border-gray-200 p-8 relative">
+              <button onClick={() => setCurrentStep(2)} className="absolute top-6 right-6 text-[#008d36] font-bold hover:underline text-sm">← Voltar</button>
+              <h2 className="text-2xl font-black text-gray-900 mb-6">Proteções e extras</h2>
 
-              <div className="border border-green-200 rounded mb-8 bg-green-50 p-4 flex gap-4 text-sm font-bold items-center">
-                 <div className="flex-1 border-r border-green-200">
-                    <div className="text-[10px] uppercase text-green-700">Preço Base do Veículo</div>
-                    <div>R$ {selectedCar?.price.toFixed(2).replace('.', ',')} / dia</div>
-                 </div>
-                 <div className="flex-1">
-                    <div className="text-[10px] uppercase text-green-700">Novo Preço Estimado c/ Extras</div>
-                    <div className="text-lg">R$ {(selectedCar?.price + selectedExtrasPricePerDay).toFixed(2).replace('.', ',')} / dia</div>
-                 </div>
-                 <button 
-                    onClick={() => {
-                        const payload = {
-                            car: selectedCar,
-                            extras: selectedExtrasMap,
-                            pickupLoc: "GUARULHOS AIRPORT",
-                            pickupDate: "2026-03-18 10:00",
-                            dropoffLoc: "GUARULHOS AIRPORT",
-                            dropoffDate: "2026-04-09 09:45",
-                            basePrice: selectedCar.price,
-                            extrasPrice: selectedExtrasPricePerDay,
-                            totalDay: selectedCar.price + selectedExtrasPricePerDay
-                        };
-                        sessionStorage.setItem('europcar_booking', JSON.stringify(payload));
-                        window.location.href = '/checkout';
-                    }}
-                    className="bg-[#ffcc00] hover:bg-[#e6b800] text-gray-900 font-bold py-3 px-6 rounded shadow-sm shrink-0 uppercase text-xs transition-colors">
-                    Ir para revisão
-                 </button>
+              <div className="border border-green-200 rounded mb-8 bg-green-50 p-4 flex gap-4 items-center">
+                <div className="flex-1 border-r border-green-200">
+                  <div className="text-[10px] uppercase text-green-700">Veículo</div>
+                  <div className="font-bold text-sm">{selectedCar?.carCategoryName || selectedCar?.carCategoryCode}</div>
+                  <div className="text-xs text-green-700">{selectedCar?.currency} {fmtPrice(selectedCar?.totalRateEstimate)}</div>
+                </div>
+                <div className="flex-1">
+                  <div className="text-[10px] uppercase text-green-700">Extras</div>
+                  <div className="font-bold text-sm">+ R$ {selectedExtrasPricePerDay.toFixed(2).replace(".", ",")} / dia</div>
+                </div>
+                <button
+                  onClick={() => {
+                    const payload = { car: selectedCar, extras: selectedExtrasMap, pickupStation, returnStation, pickupDate, returnDate, pickupTime, returnTime, contractID: effectiveContractID };
+                    sessionStorage.setItem("europcar_booking", JSON.stringify(payload));
+                    window.location.href = "/checkout";
+                  }}
+                  className="bg-[#ffcc00] hover:bg-[#e6b800] text-gray-900 font-bold py-3 px-6 rounded shrink-0 text-sm uppercase"
+                >
+                  Ir para revisão →
+                </button>
               </div>
 
-              {loadingExtras ? (
-                 <div className="text-gray-500 font-bold py-10 text-center">Carregando proteções e extras...</div>
+              {/* Proteções da API Europcar XRS */}
+              {selectedCar?.optionalInsurances?.length > 0 ? (
+                <>
+                  <h3 className="font-bold text-lg text-gray-900 mb-4">Proteções disponíveis</h3>
+                  <div className="grid grid-cols-2 gap-4 mb-8">
+                    {selectedCar.optionalInsurances.map((ins: any) => {
+                      const insId = ins.code;
+                      const sel = selectedExtrasMap[insId] > 0;
+                      const priceEUR = parseFloat(ins.price || "0");
+                      const priceBRL = parseFloat(ins.priceInBookingCurrency || "0");
+                      const totalWithIns = parseFloat(ins.rentalPriceAI || "0");
+                      const totalWithInsBRL = parseFloat(ins.rentalPriceInBookingCurrencyAI || "0");
+                      // Insurance code descriptions
+                      const insNames: Record<string, string> = {
+                        PREMIUM: "Cobertura Premium", PREMPRE: "Premium Pré-pago", PREMUP: "Premium Plus",
+                        SPCDW: "Super Proteção CDW", SPTHW: "Super Proteção THW", STHW: "Proteção THW+",
+                        SCDW: "Proteção CDW+", MEDIUM: "Cobertura Média", RSA: "Assistência na Estrada",
+                        APP: "Proteção de Aparência",
+                      };
+                      const insDesc: Record<string, string> = {
+                        PREMIUM: "Cobertura total: colisão, roubo, vidros, pneus e mais. Sem franquia.",
+                        PREMPRE: "Cobertura premium pré-paga com desconto. Sem franquia.",
+                        PREMUP: "Upgrade para a maior cobertura disponível. Franquia reduzida.",
+                        SPCDW: "Super CDW: franquia zero em danos à carroceria.",
+                        SPTHW: "Super THW: franquia zero em roubo e danos.",
+                        STHW: `Proteção roubo e dano. Franquia: EUR ${ins.excessWithPOM || "—"}.`,
+                        SCDW: `Proteção colisão e dano. Franquia: EUR ${ins.excessWithPOM || "—"}.`,
+                        MEDIUM: `Cobertura intermediária. Franquia: EUR ${ins.excessWithPOM || "—"}.`,
+                        RSA: "Assistência na estrada 24h incluída.",
+                        APP: "Cobre danos estéticos: arranhões, amassados e rodas.",
+                      };
+                      return (
+                        <div key={insId} className={`border-2 rounded-lg p-5 transition-colors ${sel ? "border-[#008d36] bg-green-50" : "border-gray-200 hover:border-[#008d36]"}`}>
+                          <div className="flex justify-between items-start mb-2">
+                            <h4 className="font-black text-gray-900">{insNames[insId] || insId}</h4>
+                            {ins.excessWithPOM && parseFloat(ins.excessWithPOM) === 0 && (
+                              <span className="text-[10px] bg-green-100 text-green-700 font-bold px-2 py-0.5 rounded-full">SEM FRANQUIA</span>
+                            )}
+                          </div>
+                          <div className="text-xl font-black text-gray-900 mb-1">
+                            EUR {priceEUR.toFixed(2)}
+                            {priceBRL > 0 && <span className="text-sm font-normal text-gray-400 ml-1">(BRL {priceBRL.toFixed(2)})</span>}
+                            <span className="text-xs text-gray-400 font-normal"> /dia</span>
+                          </div>
+                          {totalWithInsBRL > 0 && (
+                            <div className="text-xs text-green-700 font-bold mb-1">Total com proteção: BRL {totalWithInsBRL.toFixed(2)}</div>
+                          )}
+                          <p className="text-sm text-gray-500 mb-4">{insDesc[insId] || "Proteção adicional."}</p>
+                          <button
+                            onClick={() => sel ? handleExtraQuantity(insId, -1) : handleExtraQuantity(insId, 1)}
+                            className={`w-full font-bold py-2 rounded text-sm transition-colors ${sel ? "bg-gray-100 text-gray-500" : "bg-[#ffcc00] hover:bg-[#e6b800] text-gray-900"}`}
+                          >
+                            {sel ? "Remover ✓" : "Adicionar"}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
               ) : (
-                 <>
-                   {/* PROTECTIONS */}
-                   {dbExtras.filter(e => e.type === 'PROTECTION').length > 0 && (
-                     <>
-                       <h3 className="font-bold text-gray-900 text-lg mb-4">Escolha sua proteção</h3>
-                       <div className="grid grid-cols-2 gap-4 mb-10">
-                          {dbExtras.filter(e => e.type === 'PROTECTION').map(extra => {
-                             const isSelected = selectedExtrasMap[extra.id] > 0;
-                             return (
-                               <div key={extra.id} className={`bg-white border-2 rounded-lg p-6 flex flex-col justify-between ${isSelected ? 'border-[#008d36] shadow-md' : 'border-gray-200 hover:border-[#008d36]'}`}>
-                                  <div>
-                                     <h4 className="font-black text-lg text-gray-900 mb-1">{extra.name}</h4>
-                                     <div className="flex items-baseline gap-1 mb-4">
-                                        <span className="text-xl font-black text-gray-900">R$ {extra.pricePerDay.toFixed(2).replace('.', ',')}</span>
-                                        <span className="text-xs text-gray-500 font-bold">/ dia</span>
-                                     </div>
-                                     <p className="text-sm text-gray-600 mb-6">{extra.description}</p>
-                                  </div>
-                                  <button 
-                                     onClick={() => {
-                                        if (isSelected) {
-                                           handleExtraQuantity(extra.id, -1);
-                                        } else {
-                                           handleExtraQuantity(extra.id, 1);
-                                        }
-                                     }}
-                                     className={`w-full font-bold py-3 rounded text-sm transition-colors ${isSelected ? 'bg-white border-2 border-gray-200 text-gray-500' : 'bg-[#ffcc00] hover:bg-[#e6b800] text-gray-900 border-2 border-transparent'}`}>
-                                     {isSelected ? 'Remover' : 'Selecionar'}
-                                  </button>
-                               </div>
-                             );
-                          })}
-                       </div>
-                     </>
-                   )}
-
-                   {/* ADDONS */}
-                   {dbExtras.filter(e => e.type === 'ADDON').length > 0 && (
-                     <>
-                       <h3 className="font-bold text-gray-900 text-lg mb-4">Extras disponíveis</h3>
-                       <div className="grid grid-cols-4 gap-4">
-                          {dbExtras.filter(e => e.type === 'ADDON').map(extra => {
-                             const qty = selectedExtrasMap[extra.id] || 0;
-                             return (
-                               <div key={extra.id} className={`bg-white border-2 rounded-lg p-4 flex flex-col justify-between ${qty > 0 ? 'border-[#008d36] shadow-sm' : 'border-gray-200 hover:border-gray-300'}`}>
-                                  <div>
-                                     <div className="flex gap-3 items-start mb-2 min-h-[40px]">
-                                       {extra.imageUrl && (
-                                          <img src={extra.imageUrl} alt={extra.name} className="w-10 h-10 object-contain rounded bg-white" />
-                                       )}
-                                       <h4 className="font-bold text-sm text-gray-900 leading-tight flex-1">{extra.name}</h4>
-                                     </div>
-                                     <p className="text-xs text-gray-500 mb-4 line-clamp-3" title={extra.description}>{extra.description}</p>
-                                     <div className="flex items-baseline gap-1 mb-4">
-                                        <span className="text-base font-black text-gray-900">R$ {extra.pricePerDay.toFixed(2).replace('.', ',')}</span>
-                                        <span className="text-[10px] text-gray-500 font-bold">/ dia</span>
-                                     </div>
-                                  </div>
-                                  <div className="flex flex-col gap-2">
-                                     {qty > 0 ? (
-                                        <div className="flex items-center justify-between border border-gray-300 rounded overflow-hidden">
-                                           <button onClick={() => handleExtraQuantity(extra.id, -1)} className="w-10 h-10 flex items-center justify-center bg-gray-50 hover:bg-gray-100 text-gray-600 font-bold text-lg">-</button>
-                                           <span className="font-bold text-gray-900">{qty}</span>
-                                           <button onClick={() => handleExtraQuantity(extra.id, 1)} className="w-10 h-10 flex items-center justify-center bg-gray-50 hover:bg-gray-100 text-[#008d36] font-bold text-lg">+</button>
-                                        </div>
-                                     ) : (
-                                        <button onClick={() => handleExtraQuantity(extra.id, 1)} className="w-full bg-[#ffcc00] hover:bg-[#e6b800] text-gray-900 font-bold py-2 rounded text-sm transition-colors">
-                                           Adicionar
-                                        </button>
-                                     )}
-                                  </div>
-                               </div>
-                             );
-                          })}
-                       </div>
-                     </>
-                   )}
-                 </>
+                <p className="text-gray-400 text-sm py-4">Nenhuma proteção disponível para este veículo.</p>
               )}
             </div>
           )}
         </div>
       </div>
     </div>
+  );
+}
+
+// ---- Export with Suspense (required for useSearchParams in Next.js 14) ----
+export default function VehiclesSelectionPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-[#f7f7f7] flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-10 h-10 border-4 border-[#008d36] border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="font-bold text-gray-600">Carregando...</p>
+        </div>
+      </div>
+    }>
+      <VehiclesContent />
+    </Suspense>
   );
 }

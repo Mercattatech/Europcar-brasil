@@ -5,55 +5,73 @@ import prisma from '@/lib/prisma';
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { rateId, acrissCategory, driverData, paymentData, contractID } = body;
-    
-    // Build contractID attribute injection if promo is active
+    const {
+      carCategory, rateId,
+      pickupStation, returnStation,
+      pickupDate, returnDate,
+      pickupTime, returnTime,
+      driverData, paymentData, contractID
+    } = body;
+
+    if (!carCategory || !rateId) {
+      return NextResponse.json({ error: 'carCategory e rateId são obrigatórios' }, { status: 400 });
+    }
+
+    // Build contractID attribute if promotion is active
     const contractAttr = contractID ? ` contractID="${contractID}" type="C"` : '';
-    
-    const xmlRequest = `
-      <?xml version="1.0" encoding="UTF-8"?>
-      <Request>
-        <Action>bookReservation</Action>
-        <RateId>${rateId}</RateId>
-        <CarCategory${contractAttr}>${acrissCategory}</CarCategory>
-        
-        <Payment>
-           <PrepaidMode>NP</PrepaidMode>
-           <MeanOfPayment TypeCode="CC">
-             <!-- Se o cartão foi processado via Cielo, apenas confirmamos reserva -->
-           </MeanOfPayment>
-        </Payment>
-        
-        <Driver>
-            <FirstName>${driverData.firstName}</FirstName>
-            <LastName>${driverData.lastName}</LastName>
-            <Email>${driverData.email}</Email>
-        </Driver>
-      </Request>
-    `.trim();
 
-    const mockConfig = { callerCode: process.env.XRS_CALLER_CODE || 'DEMO', password: process.env.XRS_PASSWORD || 'DEMO', action: 'bookReservation', sourceFile: 'bookReservation/route.ts' };
-    
-    const xrsResponse = await callXRS(xmlRequest, mockConfig);
+    const xmlRequest = `<?xml version="1.0" encoding="UTF-8"?>
+<message>
+  <serviceRequest serviceCode="bookReservation">
+    <serviceParameters>
+      <reservation carCategory="${carCategory}" rateId="${rateId}"${contractAttr}>
+        <checkout stationID="${pickupStation}" date="${pickupDate}" time="${pickupTime || '1000'}"/>
+        <checkin stationID="${returnStation || pickupStation}" date="${returnDate}" time="${returnTime || '1000'}"/>
+        <equipmentList/>
+      </reservation>
+      <driver countryOfResidence="BR"
+              firstName="${driverData?.firstName || 'Test'}"
+              lastName="${driverData?.lastName || 'Client'}"
+              title="${driverData?.title || 'MR'}"/>
+    </serviceParameters>
+  </serviceRequest>
+</message>`;
 
-    const resNumber = xrsResponse?.Response?.ReservationNumber || xrsResponse?.resNumber || 'SIMULADO_123';
+    const config = {
+      callerCode: process.env.XRS_CALLER_CODE || 'DEMO',
+      password: process.env.XRS_PASSWORD || 'DEMO',
+      action: 'bookReservation',
+      sourceFile: 'bookReservation/route.ts'
+    };
 
-    await prisma.localReservation.create({
+    const xrsResponse = await callXRS(xmlRequest, config);
+
+    // Extract reservation number from response
+    const resNumber =
+      xrsResponse?.message?.serviceResponse?.reservation?.$?.resNumber ||
+      xrsResponse?.serviceResponse?.reservation?.$?.resNumber ||
+      null;
+
+    // Save local reservation record
+    if (paymentData) {
+      await prisma.localReservation.create({
         data: {
-          resNumber: resNumber,
-          merchantOrderId: paymentData.merchantOrderId || 'SIMULADO_ORDER_ID',
+          resNumber: resNumber || `LOCAL_${Date.now()}`,
+          merchantOrderId: paymentData.merchantOrderId || `ORDER_${Date.now()}`,
           customerData: JSON.stringify({
             ...driverData,
-            contractID: contractID || null  // Track which promo was used
+            contractID: contractID || null,
+            carCategory,
           }),
           status: paymentData.paid ? 'CONFIRMED_PREPAID' : 'CONFIRMED_NON_PREPAID'
         }
-    });
+      });
+    }
 
-    return NextResponse.json({ 
-       success: true, 
-       resNumber, 
-       message: 'Reserva concluída com sucesso' 
+    return NextResponse.json({
+      success: true,
+      resNumber,
+      raw: xrsResponse
     });
 
   } catch (error: any) {
